@@ -28,7 +28,7 @@ export interface ApiConfig {
 }
 
 export const apiConfig: ApiConfig = {
-  baseUrl: "http://localhost:5000/api",
+  baseUrl: `${import.meta.env.VITE_API_URL || "http://localhost:5000"}/api`,
   refreshInterval: 2000, // 2 segundos
   endpoints: {
     data: "/data",
