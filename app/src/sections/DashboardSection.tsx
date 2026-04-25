@@ -14,6 +14,7 @@ import Gauge from '../components/Gauge';
 import DataWidget from '../components/DataWidget';
 import RealTimeChart from '../components/RealTimeChart';
 import ConnectionStatus from '../components/ConnectionStatus';
+import PollingToggle from '../components/PollingToggle';
 import {
   useSolarData, useRealtimeBuffer, useHistoryData, useSolarStats,
 } from '../hooks/useSolarData';
@@ -28,7 +29,7 @@ const DashboardSection: React.FC = () => {
   const chartsRef  = useRef<HTMLDivElement>(null);
   const ledRef     = useRef<HTMLDivElement>(null);
 
-  const { data, loading } = useSolarData();
+  const { data, loading, togglePolling, togglingPolling } = useSolarData();
   const { voltageBuffer, currentBuffer, powerBuffer, ldrBuffer } = useRealtimeBuffer(data);
   const { history } = useHistoryData();
   const stats = useSolarStats(data, history);
@@ -84,13 +85,20 @@ const DashboardSection: React.FC = () => {
           </p>
         </div>
 
-        {/* ── Dos indicadores de conexión ── */}
-        <div className="mb-8">
-          <ConnectionStatus
-            firebaseConnected={data.firebase_connected}
-            circuitConnected={data.circuit_connected}
-            serverTimestamp={data.server_timestamp}
-            circuitTimestamp={data.circuit_timestamp}
+        {/* ── Dos indicadores de conexión + control de polling ── */}
+        <div className="mb-8 flex flex-col sm:flex-row items-start sm:items-center gap-4">
+          <div className="flex-1">
+            <ConnectionStatus
+              firebaseConnected={data.firebase_connected}
+              circuitConnected={data.circuit_connected}
+              serverTimestamp={data.server_timestamp}
+              circuitTimestamp={data.circuit_timestamp}
+            />
+          </div>
+          <PollingToggle
+            pollingActive={data.polling_active}
+            toggling={togglingPolling}
+            onToggle={togglePolling}
           />
         </div>
 
@@ -180,7 +188,7 @@ const DashboardSection: React.FC = () => {
             <Activity className="w-6 h-6 text-neon-cyan" />
             Gráficos en Tiempo Real
             <span className="font-mono-custom text-xs text-white/30 ml-2">
-              ({voltageBuffer.length} puntos · cada 2 s)
+              ({voltageBuffer.length} puntos · cada 5 s)
             </span>
             {!data.circuit_connected && (
               <span className="ml-2 px-2 py-0.5 rounded-full bg-red-500/20 border border-red-500/30 text-red-400 font-mono-custom text-xs">

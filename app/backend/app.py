@@ -53,6 +53,9 @@ _state = {
     "circuit_last_seen":   None,   # datetime calculado desde hora + fecha del último registro
     "circuit_last_hora":   None,   # string "HH:MM:SS" del último registro del circuito
     "circuit_last_fecha":  None,   # string "YYYY-MM-DD" del último registro
+
+    # Control de polling: si False, el hilo NO consulta Firebase
+    "polling_active":      True,
 }
 
 # Cache de valores para el frontend
@@ -78,6 +81,9 @@ data_cache = {
 
     # Retrocompatibilidad
     "connected":          False,  # True solo si AMBAS conexiones están OK
+
+    # Control de polling
+    "polling_active":     True,   # Si False, el backend NO consulta Firebase
 }
 
 # =============================================================================
@@ -197,12 +203,17 @@ def fetch_data_from_firebase():
         "firebase_connected": _state["firebase_ok"],
         "circuit_connected":  _state["circuit_ok"],
         "connected":          _state["firebase_ok"] and _state["circuit_ok"],
+        "polling_active":     _state["polling_active"],
     })
 
 
 def background_data_fetcher():
     while True:
-        fetch_data_from_firebase()
+        if _state["polling_active"]:
+            fetch_data_from_firebase()
+        else:
+            # Polling pausado: actualizar solo el flag en el cache sin tocar Firebase
+            data_cache["polling_active"] = False
         time.sleep(5)
 
 
@@ -642,6 +653,32 @@ def get_data():
     return jsonify(data_cache)
 
 
+@app.route("/api/polling", methods=["POST"])
+def set_polling():
+    """
+    Activa o pausa el polling del backend hacia Firebase.
+    Body JSON: { "active": true | false }
+    o sin body: alterna el estado actual (toggle).
+    """
+    from flask import request as flask_request
+    body = flask_request.get_json(silent=True) or {}
+    if "active" in body:
+        new_state = bool(body["active"])
+    else:
+        # Toggle
+        new_state = not _state["polling_active"]
+
+    _state["polling_active"]   = new_state
+    data_cache["polling_active"] = new_state
+
+    status = "activo" if new_state else "pausado"
+    print(f"[POLLING] Estado cambiado → {status.upper()}")
+    return jsonify({
+        "polling_active": new_state,
+        "message": f"Polling {status}",
+    })
+
+
 @app.route("/api/status")
 def get_status():
     circuit_dt = _state.get("circuit_last_seen")
@@ -655,6 +692,7 @@ def get_status():
         "circuit_last_hora":  _state.get("circuit_last_hora"),
         "circuit_last_fecha": _state.get("circuit_last_fecha"),
         "circuit_timeout_sec": CIRCUIT_TIMEOUT_SEC,
+        "polling_active":     _state["polling_active"],
         "location":   "Parque Caldas, Popayán, Cauca, Colombia",
         "hardware":   "ESP8266 WiFi Module",
     })
@@ -919,12 +957,13 @@ if __name__ == "__main__":
     print(f"Firebase: {FIREBASE_URL}/lecturas.json")
     print(f"Timeout circuito: {CIRCUIT_TIMEOUT_SEC}s")
     print("Endpoints:")
-    print("  GET /api/data          -> Último dato + estado de conexión")
-    print("  GET /api/status        -> Estado detallado de conexiones")
-    print("  GET /api/history       -> Historial completo")
-    print("  GET /api/daily-summary -> Resumen estadístico por día")
-    print("  GET /api/led-analysis  -> Análisis LED por día")
-    print("  GET /api/ai-analysis   -> [IA] Análisis completo de inteligencia artificial")
-    print("  GET /api/ai-predict    -> [IA] Predicción de potencia en tiempo real")
+    print("  GET  /api/data          -> Último dato + estado de conexión")
+    print("  GET  /api/status        -> Estado detallado de conexiones")
+    print("  POST /api/polling       -> Activar/pausar polling a Firebase")
+    print("  GET  /api/history       -> Historial completo")
+    print("  GET  /api/daily-summary -> Resumen estadístico por día")
+    print("  GET  /api/led-analysis  -> Análisis LED por día")
+    print("  GET  /api/ai-analysis   -> [IA] Análisis completo de inteligencia artificial")
+    print("  GET  /api/ai-predict    -> [IA] Predicción de potencia en tiempo real")
     print("=" * 60)
     app.run(host="0.0.0.0", port=5000, debug=True)

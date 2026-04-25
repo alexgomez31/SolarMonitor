@@ -4,6 +4,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 
+
 // =============================================================================
 // INTERFACES
 // =============================================================================
@@ -25,6 +26,8 @@ export interface SolarData {
   firebase_connected: boolean;
   circuit_connected:  boolean;
   connected: boolean;
+  // Control de polling
+  polling_active: boolean;
   // Retrocompat
   timestamp: string | null;
 }
@@ -108,8 +111,9 @@ export interface RealtimePoint {
 // =============================================================================
 
 const API_BASE_URL      = 'http://localhost:5000/api';
-const REFRESH_INTERVAL  = 2000;   // 2 s
-const REALTIME_BUFFER   = 120;    // 4 min de puntos (120 × 2 s)
+const REFRESH_INTERVAL  = 5000;   // 5 s (reducido de 2s para ahorrar cuota)
+const REALTIME_BUFFER   = 120;    // 4 min de puntos (120 × 5 s)
+
 
 // =============================================================================
 // HOOK - Dato más reciente en tiempo real
@@ -123,10 +127,11 @@ export function useSolarData() {
     hora: null,
     server_timestamp: null, circuit_timestamp: null,
     firebase_connected: false, circuit_connected: false,
-    connected: false, timestamp: null,
+    connected: false, polling_active: true, timestamp: null,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
+  const [togglingPolling, setTogglingPolling] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchData = useCallback(async () => {
@@ -151,7 +156,26 @@ export function useSolarData() {
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [fetchData]);
 
-  return { data, loading, error, refresh: fetchData };
+  /** Llama a POST /api/polling para activar o pausar el polling en el backend */
+  const togglePolling = useCallback(async () => {
+    setTogglingPolling(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/polling`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: !data.polling_active }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // Refrescar el estado inmediatamente
+      await fetchData();
+    } catch (err) {
+      console.error('[togglePolling] Error:', err);
+    } finally {
+      setTogglingPolling(false);
+    }
+  }, [data.polling_active, fetchData]);
+
+  return { data, loading, error, refresh: fetchData, togglePolling, togglingPolling };
 }
 
 // =============================================================================
