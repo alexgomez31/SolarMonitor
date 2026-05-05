@@ -37,7 +37,7 @@ app = Flask(
 )
 CORS(app)
 
-FIREBASE_URL = "https://caldas-d4fa9-default-rtdb.firebaseio.com"
+FIREBASE_URL = "https://caldas-v2-default-rtdb.firebaseio.com/"
 
 # Tiempo máximo de silencio del circuito antes de considerar desconexión (segundos)
 CIRCUIT_TIMEOUT_SEC = 60
@@ -60,15 +60,10 @@ _state = {
 
 # Cache de valores para el frontend
 data_cache = {
-    # Datos eléctricos (se ponen a 0 cuando circuito desconectado)
-    "voltage":    0.0,
-    "current":    0.0,
-    "current_mA": 0.0,
-    "power":      0.0,
-    "power_mW":   0.0,
-    "ldr":        0,
-    "led":        "APAGADO",
-    "ambiente":   "NOCHE",
+    # Datos del circuito Arduino (campos reales que manda el ESP8266)
+    "ldr":        0,           # valor analógico del fotosensor (0-1024)
+    "estadoLDR":  "APAGADO",  # estado calculado del LED: ENCENDIDO | APAGADO
+    "estado":     "DESCONOCIDO",  # estado batería/panel: CARGANDO | EQUILIBRIO | DESCARGANDO | DESCONOCIDO
     "hora":       None,
 
     # Timestamps
@@ -91,22 +86,21 @@ data_cache = {
 # =============================================================================
 
 def parse_reading(record: dict) -> dict:
+    """Parsea un registro tal como lo envía el Arduino:
+       { hora, ldr, estadoLDR, estado }
+    """
     return {
-        "voltage":    float(record.get("voltaje_V",    0.0)),
-        "current":    float(record.get("corriente_A",  0.0)),
-        "current_mA": float(record.get("corriente_mA", 0.0)),
-        "power":      float(record.get("potencia_W",   0.0)),
-        "power_mW":   float(record.get("potencia_mW",  0.0)),
-        "ldr":        int(record.get("ldr",   0)),
-        "led":        str(record.get("led",   "APAGADO")),
-        "ambiente":   str(record.get("ambiente", "NOCHE")),
-        "hora":       record.get("hora", None),
+        "ldr":       int(record.get("ldr",        0)),
+        "estadoLDR": str(record.get("estadoLDR",  "APAGADO")),
+        "estado":    str(record.get("estado",     "DESCONOCIDO")),
+        "hora":      record.get("hora", None),
     }
 
 
 def get_latest_with_date(lecturas: dict):
     """
     Retorna (record_dict, fecha_str) del registro más reciente.
+    Busca registros que tengan al menos el campo 'hora' (formato del Arduino).
     """
     if not lecturas or not isinstance(lecturas, dict):
         return None, None
@@ -116,7 +110,7 @@ def get_latest_with_date(lecturas: dict):
             continue
         for push_id in sorted(day_data.keys(), reverse=True):
             record = day_data[push_id]
-            if isinstance(record, dict) and "voltaje_V" in record:
+            if isinstance(record, dict) and "hora" in record:
                 return parse_reading(record), day_key
     return None, None
 
@@ -161,27 +155,21 @@ def fetch_data_from_firebase():
 
                 # Actualizar cache
                 if circuit_alive:
-                    # Circuito activo → mostrar valores reales
+                    # Circuito activo → mostrar valores reales del Arduino
                     data_cache.update({
-                        "voltage":    round(latest["voltage"],    3),
-                        "current":    round(latest["current"],    5),
-                        "current_mA": round(latest["current_mA"], 2),
-                        "power":      round(latest["power"],      4),
-                        "power_mW":   round(latest["power_mW"],   2),
-                        "ldr":        latest["ldr"],
-                        "led":        latest["led"],
-                        "ambiente":   latest["ambiente"],
-                        "hora":       hora_str,
+                        "ldr":       latest["ldr"],
+                        "estadoLDR": latest["estadoLDR"],
+                        "estado":    latest["estado"],
+                        "hora":      hora_str,
                     })
-                    print(f"[OK] circuito vivo ({elapsed:.0f}s) V={data_cache['voltage']}V  I={data_cache['current_mA']}mA")
+                    print(f"[OK] circuito vivo ({elapsed:.0f}s) LDR={data_cache['ldr']} estadoLDR={data_cache['estadoLDR']} estado={data_cache['estado']}")
                 else:
-                    # Circuito silencioso → poner valores a cero
+                    # Circuito silencioso → poner valores en reposo
                     data_cache.update({
-                        "voltage": 0.0, "current": 0.0, "current_mA": 0.0,
-                        "power": 0.0, "power_mW": 0.0, "ldr": 0,
-                        "led": "APAGADO", "ambiente": "NOCHE", "hora": hora_str,
+                        "ldr": 0, "estadoLDR": "APAGADO",
+                        "estado": "DESCONOCIDO", "hora": hora_str,
                     })
-                    print(f"[WARN] circuito silencioso hace {elapsed:.0f}s — valores a cero")
+                    print(f"[WARN] circuito silencioso hace {elapsed:.0f}s — valores en reposo")
             else:
                 _state["circuit_ok"] = False
                 print("[WARN] Sin registros válidos en Firebase")
@@ -241,7 +229,8 @@ def load_all_history() -> list:
                 continue
             for push_id in sorted(day_data.keys()):
                 record = day_data[push_id]
-                if not isinstance(record, dict) or "voltaje_V" not in record:
+                # El Arduino manda registros con campo 'hora'
+                if not isinstance(record, dict) or "hora" not in record:
                     continue
                 r = parse_reading(record)
                 hora = r["hora"] or "00:00:00"
@@ -250,17 +239,14 @@ def load_all_history() -> list:
                 except ValueError:
                     continue
                 history.append({
-                    "timestamp":  ts,
-                    "ts_iso":     ts.isoformat(),
-                    "fecha":      day_key,
-                    "hora":       hora,
+                    "timestamp":   ts,
+                    "ts_iso":      ts.isoformat(),
+                    "fecha":       day_key,
+                    "hora":        hora,
                     "hour_of_day": ts.hour + ts.minute / 60.0,
-                    "voltage":    round(r["voltage"],    3),
-                    "current_mA": round(r["current_mA"], 2),
-                    "power_mW":   round(r["power_mW"],   2),
-                    "ldr":        r["ldr"],
-                    "led":        r["led"],
-                    "ambiente":   r["ambiente"],
+                    "ldr":         r["ldr"],
+                    "estadoLDR":   r["estadoLDR"],
+                    "estado":      r["estado"],
                 })
         return history
     except Exception as exc:
@@ -274,62 +260,41 @@ def load_all_history() -> list:
 
 def run_anomaly_detection(data: list) -> dict:
     """
-    Detecta anomalías usando Z-Score e IQR sobre voltaje, corriente y potencia.
-    Retorna índices y valores anómalos.
+    Detecta anomalías usando Z-Score sobre el LDR.
     """
     if len(data) < 10:
         return {"anomalies": [], "total": 0, "pct": 0.0}
 
-    voltages   = np.array([d["voltage"]    for d in data])
-    currents   = np.array([d["current_mA"] for d in data])
-    powers     = np.array([d["power_mW"]   for d in data])
-
+    ldrs = np.array([d["ldr"] for d in data])
     anomalies = []
     for i, d in enumerate(data):
-        score_v = abs(stats.zscore(voltages)[i])
-        score_c = abs(stats.zscore(currents)[i])
-        score_p = abs(stats.zscore(powers)[i])
-        max_score = max(score_v, score_c, score_p)
-
-        if max_score > 2.5:
-            severity = "critical" if max_score > 3.5 else "warning"
+        score = abs(stats.zscore(ldrs)[i])
+        if score > 2.5:
+            severity = "critical" if score > 3.5 else "warning"
             anomalies.append({
                 "timestamp":  d["ts_iso"],
                 "hora":       d["hora"],
                 "fecha":      d["fecha"],
-                "voltage":    d["voltage"],
-                "current_mA": d["current_mA"],
-                "power_mW":   d["power_mW"],
-                "z_score":    round(max_score, 2),
+                "ldr":        d["ldr"],
+                "estadoLDR":  d["estadoLDR"],
+                "estado":     d["estado"],
+                "z_score":    round(score, 2),
                 "severity":   severity,
-                "description": _anomaly_desc(d, score_v, score_c, score_p),
+                "description": f"LDR inusual: {d['ldr']} (z={score:.2f})",
             })
 
     pct = round(len(anomalies) / len(data) * 100, 1) if data else 0.0
-    return {
-        "anomalies": anomalies[-20:],  # últimas 20
-        "total":     len(anomalies),
-        "pct":       pct,
-    }
-
-
-def _anomaly_desc(d: dict, sv: float, sc: float, sp: float) -> str:
-    parts = []
-    if sv > 2.5: parts.append(f"Voltaje inusual ({d['voltage']}V)")
-    if sc > 2.5: parts.append(f"Corriente inusual ({d['current_mA']}mA)")
-    if sp > 2.5: parts.append(f"Potencia inusual ({d['power_mW']}mW)")
-    return "; ".join(parts) if parts else "Anomalía detectada"
+    return {"anomalies": anomalies[-20:], "total": len(anomalies), "pct": pct}
 
 
 def run_clustering(data: list) -> dict:
     """
-    K-Means sobre (ldr, power_mW) para clasificar períodos del día.
-    Retorna: clusters asignados a cada punto + centroides + etiquetas.
+    K-Means sobre el LDR para clasificar períodos del día.
     """
     if len(data) < 15:
         return {"points": [], "centroids": [], "labels": {}}
 
-    X = np.array([[d["ldr"], d["power_mW"]] for d in data])
+    X = np.array([[d["ldr"], 0] for d in data])
 
     # Normalizar
     scaler = StandardScaler()
@@ -363,11 +328,12 @@ def run_clustering(data: list) -> dict:
     for i, d in enumerate(data):
         c = int(labels[i])
         points.append({
-            "timestamp": d["ts_iso"],
-            "hora":      d["hora"],
-            "ldr":       d["ldr"],
-            "power_mW":  d["power_mW"],
-            "cluster":   c,
+            "timestamp":     d["ts_iso"],
+            "hora":          d["hora"],
+            "ldr":           d["ldr"],
+            "estadoLDR":     d["estadoLDR"],
+            "estado":        d["estado"],
+            "cluster":       c,
             "cluster_name":  cluster_name_map[c],
             "cluster_color": cluster_colors[c],
         })
@@ -391,184 +357,80 @@ def run_clustering(data: list) -> dict:
 
 
 def run_correlation_analysis(data: list) -> dict:
-    """
-    Calcula la matriz de correlación de Pearson entre voltage, current_mA, power_mW, ldr.
-    """
+    """Análisis simplificado: solo LDR disponible del Arduino."""
     if len(data) < 5:
         return {"matrix": {}, "insights": []}
-
-    variables = ["voltage", "current_mA", "power_mW", "ldr"]
-    arrays = {v: np.array([d[v] for d in data]) for v in variables}
-
-    matrix = {}
-    for v1 in variables:
-        matrix[v1] = {}
-        for v2 in variables:
-            if len(arrays[v1]) > 1 and arrays[v1].std() > 0 and arrays[v2].std() > 0:
-                r, p = stats.pearsonr(arrays[v1], arrays[v2])
-            else:
-                r, p = (1.0 if v1 == v2 else 0.0), 1.0
-            matrix[v1][v2] = {"r": round(float(r), 3), "p": round(float(p), 4)}
-
-    # Insights automáticos
-    insights = []
-    pairs = [
-        ("ldr", "power_mW", "LDR (luz solar)", "Potencia"),
-        ("ldr", "voltage",  "LDR (luz solar)", "Voltaje"),
-        ("voltage", "current_mA", "Voltaje", "Corriente"),
-        ("voltage", "power_mW",   "Voltaje", "Potencia"),
-    ]
-    for v1, v2, n1, n2 in pairs:
-        r = matrix[v1][v2]["r"]
-        strength = "muy fuerte" if abs(r) > 0.8 else "fuerte" if abs(r) > 0.6 else "moderada" if abs(r) > 0.4 else "débil"
-        direction = "positiva" if r > 0 else "negativa"
-        if abs(r) > 0.3:
-            insights.append({
-                "var1": n1, "var2": n2,
-                "r": r,
-                "description": f"Correlación {strength} {direction} entre {n1} y {n2} (r={r:.2f})"
-            })
-
-    return {"matrix": matrix, "insights": insights}
+    ldrs = np.array([d["ldr"] for d in data])
+    return {
+        "matrix": {"ldr": {"ldr": {"r": 1.0, "p": 0.0}}},
+        "insights": [{"var1": "LDR", "var2": "LDR",
+                      "r": 1.0,
+                      "description": f"LDR promedio: {round(float(ldrs.mean()),1)} — rango [{int(ldrs.min())}, {int(ldrs.max())}]"}],
+    }
 
 
 def run_power_prediction(data: list) -> dict:
-    """
-    Regresión polinomial: ldr → power_mW.
-    Genera curva de predicción y predicción para valores actuales de LDR.
-    """
-    if len(data) < 10:
-        return {"curve": [], "model_score": 0.0, "current_prediction": None}
-
-    X = np.array([d["ldr"]      for d in data]).reshape(-1, 1)
-    y = np.array([d["power_mW"] for d in data])
-
-    # Pipeline: features polinomiales grado 2 + regresión
-    model = Pipeline([
-        ("poly",  PolynomialFeatures(degree=2, include_bias=False)),
-        ("linreg", LinearRegression()),
-    ])
-    model.fit(X, y)
-    score = round(float(model.score(X, y)), 4)
-
-    # Curva de predicción (100 puntos de LDR min→max)
-    ldr_min = int(X.min())
-    ldr_max = int(X.max())
-    ldr_range = np.linspace(ldr_min, ldr_max, 100).reshape(-1, 1)
-    predicted = model.predict(ldr_range)
-
-    # Banda de confianza aproximada (±1 std de residuos)
-    residuals = y - model.predict(X)
-    std_err   = float(np.std(residuals))
-
-    curve = [
-        {
-            "ldr":       round(float(ldr_range[i][0]), 1),
-            "predicted": round(float(max(0, predicted[i])), 2),
-            "upper":     round(float(max(0, predicted[i] + std_err)), 2),
-            "lower":     round(float(max(0, predicted[i] - std_err)), 2),
-        }
-        for i in range(len(ldr_range))
-    ]
-
-    # Predicción con LDR actual
+    """Sin datos de potencia del Arduino — retorna estructura vacía compatible."""
     current_ldr = data_cache.get("ldr", 0)
-    pred_now    = float(max(0, model.predict([[current_ldr]])[0]))
-    real_now    = data_cache.get("power_mW", 0)
-
     return {
-        "curve":               curve,
-        "model_score":         score,
-        "model_score_pct":     round(score * 100, 1),
-        "current_ldr":         current_ldr,
-        "current_prediction":  round(pred_now, 2),
-        "current_real":        real_now,
-        "std_error":           round(std_err, 2),
-        "ldr_range":           [ldr_min, ldr_max],
+        "curve": [], "model_score": 0.0, "model_score_pct": 0.0,
+        "current_ldr": current_ldr, "current_prediction": None,
+        "current_real": 0, "std_error": 0, "ldr_range": [0, 1024],
     }
 
 
 def run_trend_analysis(data: list) -> dict:
-    """
-    Análisis de tendencia temporal usando regresión lineal sobre índice de tiempo.
-    Detecta si el rendimiento está subiendo, bajando o estable.
-    """
+    """Tendencia basada en LDR (único sensor analógico disponible)."""
     if len(data) < 10:
         return {"trend": "insufficient_data", "slope": 0, "trend_line": []}
 
-    # Usar solo registros con potencia > 0 (ignorar noche)
-    active = [d for d in data if d["power_mW"] > 0.1]
+    active = [d for d in data if d["estadoLDR"] == "ENCENDIDO"]
     if len(active) < 5:
         return {"trend": "no_active_data", "slope": 0, "trend_line": []}
 
     X = np.arange(len(active)).reshape(-1, 1)
-    y = np.array([d["power_mW"] for d in active])
-
+    y = np.array([d["ldr"] for d in active])
     model = LinearRegression()
     model.fit(X, y)
     slope = float(model.coef_[0])
-    r2    = float(model.score(X, y))
+    r2 = float(model.score(X, y))
 
-    if slope > 0.5:
-        trend = "increasing"
-        trend_label = "📈 Rendimiento en aumento"
-    elif slope < -0.5:
-        trend = "decreasing"
-        trend_label = "📉 Rendimiento en descenso"
+    if slope > 5:
+        trend, trend_label = "increasing", "📈 LDR en aumento"
+    elif slope < -5:
+        trend, trend_label = "decreasing", "📉 LDR en descenso"
     else:
-        trend = "stable"
-        trend_label = "➡️ Rendimiento estable"
+        trend, trend_label = "stable", "➡️ LDR estable"
 
     trend_line = [
-        {
-            "timestamp": active[i]["ts_iso"],
-            "hora":      active[i]["hora"],
-            "power_mW":  round(float(active[i]["power_mW"]), 2),
-            "trend":     round(float(model.predict([[i]])[0]), 2),
-        }
+        {"timestamp": active[i]["ts_iso"], "hora": active[i]["hora"],
+         "ldr": active[i]["ldr"], "trend": round(float(model.predict([[i]])[0]), 1)}
         for i in range(len(active))
     ]
-
-    return {
-        "trend":       trend,
-        "trend_label": trend_label,
-        "slope":       round(slope, 3),
-        "r2":          round(r2, 3),
-        "trend_line":  trend_line[-100:],
-    }
+    return {"trend": trend, "trend_label": trend_label,
+            "slope": round(slope, 3), "r2": round(r2, 3), "trend_line": trend_line[-100:]}
 
 
 def compute_health_score(data: list, anomalies_info: dict, clustering: dict) -> dict:
-    """
-    Score de salud del sistema solar de 0-100.
-    Componentes: estabilidad, eficiencia, anomalías, actividad.
-    """
+    """Score de salud 0-100 basado en LDR y estadoLDR del Arduino."""
     if len(data) < 5:
         return {"score": 0, "grade": "N/A", "components": {}}
 
-    voltages  = [d["voltage"]    for d in data]
-    powers    = [d["power_mW"]   for d in data]
-    ldrs      = [d["ldr"]        for d in data]
+    ldrs = [d["ldr"] for d in data]
 
-    # 1. Estabilidad de voltaje (coef de variación bajo = bueno)
-    cv_v = (np.std(voltages) / (np.mean(voltages) + 1e-6)) * 100
-    stability_score = max(0, min(100, 100 - cv_v * 5))
+    # 1. Estabilidad del LDR
+    cv_ldr = (np.std(ldrs) / (np.mean(ldrs) + 1e-6)) * 100
+    stability_score = max(0, min(100, 100 - cv_ldr * 2))
 
-    # 2. Eficiencia energética (potencia vs LDR esperado)
-    # Proxied: qué tan alta es la potencia relativa al LDR
-    max_possible_power_mW = max(ldrs) * 0.15  # estimación aproximada
-    active_powers = [p for p in powers if p > 0]
-    if active_powers and max_possible_power_mW > 0:
-        efficiency_score = min(100, (np.mean(active_powers) / max_possible_power_mW) * 100)
-    else:
-        efficiency_score = 0.0
+    # 2. Eficiencia: no aplica sin datos de potencia
+    efficiency_score = 50.0
 
     # 3. Penalización por anomalías
     anomaly_pct = anomalies_info.get("pct", 0)
     anomaly_score = max(0, 100 - anomaly_pct * 10)
 
-    # 4. Actividad del sistema (% de tiempo encendido)
-    encendidos = sum(1 for d in data if d["led"] == "ENCENDIDO")
+    # 4. Actividad del sistema (% de tiempo con LED encendido)
+    encendidos = sum(1 for d in data if d["estadoLDR"] == "ENCENDIDO")
     activity_score = (encendidos / len(data)) * 100
 
     # Score compuesto (ponderado)
@@ -604,33 +466,30 @@ def compute_health_score(data: list, anomalies_info: dict, clustering: dict) -> 
 
 
 def run_hourly_profile(data: list) -> dict:
-    """
-    Perfil promedio hora a hora: promedio de potencia por hora del día.
-    """
+    """Perfil promedio hora a hora del LDR."""
     if len(data) < 5:
         return {"profile": []}
 
     hourly = {}
     for d in data:
         h = d["timestamp"].hour
-        if h not in hourly:
-            hourly[h] = []
-        hourly[h].append(d["power_mW"])
+        hourly.setdefault(h, []).append(d["ldr"])
 
     profile = []
     for h in sorted(hourly.keys()):
         vals = hourly[h]
+        enc = sum(1 for d in data if d["timestamp"].hour == h and d["estadoLDR"] == "ENCENDIDO")
         profile.append({
-            "hour":       h,
-            "hour_label": f"{h:02d}:00",
-            "avg_power":  round(np.mean(vals), 2),
-            "max_power":  round(np.max(vals),  2),
-            "min_power":  round(np.min(vals),  2),
-            "count":      len(vals),
+            "hour":        h,
+            "hour_label":  f"{h:02d}:00",
+            "avg_ldr":     round(np.mean(vals), 1),
+            "max_ldr":     int(np.max(vals)),
+            "min_ldr":     int(np.min(vals)),
+            "encendidos":  enc,
+            "count":       len(vals),
         })
 
-    # Hora de pico
-    peak = max(profile, key=lambda x: x["avg_power"]) if profile else None
+    peak = max(profile, key=lambda x: x["avg_ldr"]) if profile else None
 
     return {
         "profile":    profile,
@@ -713,7 +572,7 @@ def get_history():
                         continue
                     for push_id in sorted(day_data.keys()):
                         record = day_data[push_id]
-                        if not isinstance(record, dict) or "voltaje_V" not in record:
+                        if not isinstance(record, dict) or "hora" not in record:
                             continue
                         r = parse_reading(record)
                         hora = r["hora"] or "00:00:00"
@@ -723,14 +582,9 @@ def get_history():
                             ts = f"{day_key}T{hora}"
                         history.append({
                             "timestamp":  ts,
-                            "voltage":    round(r["voltage"],    3),
-                            "current":    round(r["current"],    5),
-                            "current_mA": round(r["current_mA"], 2),
-                            "power":      round(r["power"],      4),
-                            "power_mW":   round(r["power_mW"],   2),
                             "ldr":        r["ldr"],
-                            "led":        r["led"],
-                            "ambiente":   r["ambiente"],
+                            "estadoLDR":  r["estadoLDR"],
+                            "estado":     r["estado"],
                             "hora":       hora,
                             "fecha":      day_key,
                         })
@@ -742,11 +596,7 @@ def get_history():
 
 @app.route("/api/daily-summary")
 def get_daily_summary():
-    """
-    Resumen estadístico por día con todos los valores:
-    voltaje, corriente, potencia, ldr, encendidos.
-    Para gráficas comparativas entre días.
-    """
+    """Resumen estadístico por día (LDR, estadoLDR, estado)."""
     try:
         resp = requests.get(f"{FIREBASE_URL}/lecturas.json", timeout=10)
         result = {}
@@ -758,12 +608,12 @@ def get_daily_summary():
                     if not isinstance(day_data, dict):
                         continue
 
-                    voltages, currents_mA, powers_mW, ldrs = [], [], [], []
+                    ldrs, encendidos = [], 0
                     readings_list = []
 
                     for push_id in sorted(day_data.keys()):
                         record = day_data[push_id]
-                        if not isinstance(record, dict) or "voltaje_V" not in record:
+                        if not isinstance(record, dict) or "hora" not in record:
                             continue
                         r = parse_reading(record)
                         hora = r["hora"] or "00:00:00"
@@ -772,34 +622,29 @@ def get_daily_summary():
                         except ValueError:
                             ts = f"{day_key}T{hora}"
 
-                        voltages.append(r["voltage"])
-                        currents_mA.append(r["current_mA"])
-                        powers_mW.append(r["power_mW"])
                         ldrs.append(r["ldr"])
+                        if r["estadoLDR"] == "ENCENDIDO":
+                            encendidos += 1
                         readings_list.append({
                             "timestamp":  ts,
                             "hora":       hora,
-                            "voltage":    round(r["voltage"],    3),
-                            "current_mA": round(r["current_mA"], 2),
-                            "power_mW":   round(r["power_mW"],   2),
                             "ldr":        r["ldr"],
-                            "led":        r["led"],
+                            "estadoLDR":  r["estadoLDR"],
+                            "estado":     r["estado"],
                         })
 
-                    if not voltages:
+                    if not ldrs:
                         continue
 
-                    def safe_max(lst): return round(max(lst), 3) if lst else 0
-                    def safe_avg(lst): return round(sum(lst)/len(lst), 3) if lst else 0
+                    def safe_max(lst): return round(max(lst), 1) if lst else 0
+                    def safe_avg(lst): return round(sum(lst)/len(lst), 1) if lst else 0
 
                     result[day_key] = {
-                        "fecha":     day_key,
-                        "count":     len(voltages),
-                        "voltage":   {"max": safe_max(voltages),   "avg": safe_avg(voltages)},
-                        "current_mA":{"max": safe_max(currents_mA),"avg": safe_avg(currents_mA)},
-                        "power_mW":  {"max": safe_max(powers_mW),  "avg": safe_avg(powers_mW)},
-                        "ldr":       {"max": safe_max(ldrs),        "avg": safe_avg(ldrs)},
-                        "readings":  readings_list,
+                        "fecha":      day_key,
+                        "count":      len(ldrs),
+                        "ldr":        {"max": safe_max(ldrs), "avg": safe_avg(ldrs)},
+                        "encendidos": encendidos,
+                        "readings":   readings_list,
                     }
         return jsonify(result)
     except Exception as exc:
@@ -828,11 +673,12 @@ def get_led_analysis():
             readings = []
             for push_id in sorted(day_data.keys()):
                 record = day_data[push_id]
-                if not isinstance(record, dict) or "voltaje_V" not in record:
+                if not isinstance(record, dict) or "hora" not in record:
                     continue
-                hora_str = record.get("hora", "00:00:00")
-                led_val  = str(record.get("led", "APAGADO")).upper()
-                led_norm = "ENCENDIDO" if "ENCENDIDO" in led_val else "APAGADO"
+                hora_str   = record.get("hora", "00:00:00")
+                # Usa estadoLDR que es lo que manda el Arduino
+                led_val    = str(record.get("estadoLDR", "APAGADO")).upper()
+                led_norm   = "ENCENDIDO" if "ENCENDIDO" in led_val else "APAGADO"
                 try:
                     t = datetime.strptime(f"{day_key} {hora_str}", "%Y-%m-%d %H:%M:%S")
                 except ValueError:

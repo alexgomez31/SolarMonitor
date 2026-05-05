@@ -1,17 +1,16 @@
 // =============================================================================
 // SolarMonitor PV - Dashboard Section (Tiempo Real)
+// Datos reales del Arduino: ldr, estadoLDR, estado (batería)
 // =============================================================================
 
 import React, { useEffect, useRef } from 'react';
 import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import {
-  Zap, Activity, TrendingUp, Sun, Battery, Power,
-  Lightbulb, Eye, CloudSun, Moon,
+  Activity, Eye, Lightbulb, Battery, BatteryCharging, BatteryMedium,
+  CloudSun, Moon, Zap,
 } from 'lucide-react';
 
-import Gauge from '../components/Gauge';
-import DataWidget from '../components/DataWidget';
 import RealTimeChart from '../components/RealTimeChart';
 import ConnectionStatus from '../components/ConnectionStatus';
 import PollingToggle from '../components/PollingToggle';
@@ -21,21 +20,45 @@ import {
 
 gsap.registerPlugin(ScrollTrigger);
 
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function EstadoBateriaIcon({ estado }: { estado: string }) {
+  if (estado === 'CARGANDO')     return <BatteryCharging className="w-8 h-8 text-emerald-400" />;
+  if (estado === 'EQUILIBRIO')   return <BatteryMedium   className="w-8 h-8 text-sky-400" />;
+  if (estado === 'DESCARGANDO')  return <Battery          className="w-8 h-8 text-red-400" />;
+  return <Battery className="w-8 h-8 text-white/30" />;
+}
+
+function estadoColor(estado: string) {
+  if (estado === 'CARGANDO')    return 'text-emerald-400';
+  if (estado === 'EQUILIBRIO')  return 'text-sky-400';
+  if (estado === 'DESCARGANDO') return 'text-red-400';
+  return 'text-white/40';
+}
+
+function estadoBg(estado: string) {
+  if (estado === 'CARGANDO')    return 'bg-emerald-500/10 border-emerald-400/30';
+  if (estado === 'EQUILIBRIO')  return 'bg-sky-500/10 border-sky-400/30';
+  if (estado === 'DESCARGANDO') return 'bg-red-500/10 border-red-400/30';
+  return 'bg-white/5 border-white/10';
+}
+
+// ─── Componente principal ────────────────────────────────────────────────────
+
 const DashboardSection: React.FC = () => {
   const sectionRef = useRef<HTMLDivElement>(null);
   const headerRef  = useRef<HTMLDivElement>(null);
-  const gaugesRef  = useRef<HTMLDivElement>(null);
-  const widgetsRef = useRef<HTMLDivElement>(null);
-  const chartsRef  = useRef<HTMLDivElement>(null);
-  const ledRef     = useRef<HTMLDivElement>(null);
+  const cardsRef   = useRef<HTMLDivElement>(null);
+  const chartRef   = useRef<HTMLDivElement>(null);
 
   const { data, loading, togglePolling, togglingPolling } = useSolarData();
-  const { voltageBuffer, currentBuffer, powerBuffer, ldrBuffer } = useRealtimeBuffer(data);
+  const { ldrBuffer } = useRealtimeBuffer(data);
   const { history } = useHistoryData();
   const stats = useSolarStats(data, history);
 
-  const ledOn = data.led?.toUpperCase().includes('ENCENDIDO');
-  const isDia = data.ambiente?.toUpperCase().includes('DIA');
+  const ledOn = data.estadoLDR?.toUpperCase().includes('ENCENDIDO');
+  // Luz ambiental: LDR bajo = hay luz solar (sensor analógico invertido)
+  const hayLuz = data.ldr < 400;
 
   useEffect(() => {
     const ctx = gsap.context(() => {
@@ -44,14 +67,10 @@ const DashboardSection: React.FC = () => {
       });
       gsap.fromTo(headerRef.current, { y: 50, opacity: 0 },
         { y: 0, opacity: 1, duration: 0.8, ease: 'power3.out', scrollTrigger: c(sectionRef.current) });
-      gsap.fromTo(gaugesRef.current?.children || [], { y: 80, opacity: 0, scale: 0.9 },
-        { y: 0, opacity: 1, scale: 1, duration: 0.6, stagger: 0.15, ease: 'back.out(1.7)', scrollTrigger: c(gaugesRef.current) });
-      gsap.fromTo(widgetsRef.current?.children || [], { y: 40, opacity: 0 },
-        { y: 0, opacity: 1, duration: 0.5, stagger: 0.1, ease: 'power3.out', scrollTrigger: c(widgetsRef.current) });
-      gsap.fromTo(chartsRef.current, { y: 60, opacity: 0 },
-        { y: 0, opacity: 1, duration: 0.8, ease: 'power3.out', scrollTrigger: c(chartsRef.current) });
-      gsap.fromTo(ledRef.current, { y: 40, opacity: 0 },
-        { y: 0, opacity: 1, duration: 0.7, ease: 'power3.out', scrollTrigger: c(ledRef.current) });
+      gsap.fromTo(cardsRef.current?.children || [], { y: 60, opacity: 0, scale: 0.95 },
+        { y: 0, opacity: 1, scale: 1, duration: 0.6, stagger: 0.12, ease: 'back.out(1.7)', scrollTrigger: c(cardsRef.current) });
+      gsap.fromTo(chartRef.current, { y: 50, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.8, ease: 'power3.out', scrollTrigger: c(chartRef.current) });
     }, sectionRef);
     return () => ctx.revert();
   }, []);
@@ -64,7 +83,7 @@ const DashboardSection: React.FC = () => {
     >
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-neon-cyan/5 rounded-full blur-3xl" />
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-neon-blue/5 rounded-full blur-3xl" />
+        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-amber-500/5 rounded-full blur-3xl" />
       </div>
 
       <div className="relative z-10 max-w-7xl mx-auto">
@@ -85,7 +104,7 @@ const DashboardSection: React.FC = () => {
           </p>
         </div>
 
-        {/* ── Dos indicadores de conexión + control de polling ── */}
+        {/* Conexión + Polling */}
         <div className="mb-8 flex flex-col sm:flex-row items-start sm:items-center gap-4">
           <div className="flex-1">
             <ConnectionStatus
@@ -102,117 +121,118 @@ const DashboardSection: React.FC = () => {
           />
         </div>
 
-        {/* ── LED / Ambiente / LDR ── */}
-        <div ref={ledRef} className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-12">
+        {/* ── Tarjetas de estado ── */}
+        <div ref={cardsRef} className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-12">
 
-          {/* LED */}
-          <div className={`flex items-center gap-4 p-5 rounded-2xl border backdrop-blur-sm
+          {/* LED / Fotocelda */}
+          <div className={`flex items-center gap-4 p-6 rounded-2xl border backdrop-blur-sm
             ${ledOn ? 'bg-amber-500/10 border-amber-400/40' : 'bg-white/5 border-white/10'}`}>
             <div className="relative flex-shrink-0">
-              <Lightbulb className={`w-8 h-8 ${ledOn ? 'text-amber-400' : 'text-white/30'}`} />
+              <Lightbulb className={`w-10 h-10 ${ledOn ? 'text-amber-400' : 'text-white/30'}`} />
               {ledOn && <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-amber-400 animate-pulse" />}
             </div>
             <div>
               <p className="font-mono-custom text-xs uppercase text-white/40 tracking-wider">Luces del Parque</p>
-              <p className={`font-display text-xl font-bold ${ledOn ? 'text-amber-400' : 'text-white/60'}`}>
+              <p className={`font-display text-2xl font-bold ${ledOn ? 'text-amber-400' : 'text-white/60'}`}>
                 {ledOn ? 'ENCENDIDAS' : 'APAGADAS'}
+              </p>
+              <p className="font-mono-custom text-[11px] text-white/30 mt-0.5">
+                estadoLDR: {data.estadoLDR}
               </p>
             </div>
           </div>
 
-          {/* Ambiente */}
-          <div className={`flex items-center gap-4 p-5 rounded-2xl border backdrop-blur-sm
-            ${isDia ? 'bg-sky-500/10 border-sky-400/40' : 'bg-indigo-500/10 border-indigo-400/40'}`}>
+          {/* Ambiente solar (LDR) */}
+          <div className={`flex items-center gap-4 p-6 rounded-2xl border backdrop-blur-sm
+            ${hayLuz ? 'bg-sky-500/10 border-sky-400/40' : 'bg-indigo-500/10 border-indigo-400/40'}`}>
             <div className="flex-shrink-0">
-              {isDia ? <CloudSun className="w-8 h-8 text-sky-400" /> : <Moon className="w-8 h-8 text-indigo-400" />}
+              {hayLuz
+                ? <CloudSun className="w-10 h-10 text-sky-400" />
+                : <Moon     className="w-10 h-10 text-indigo-400" />}
             </div>
             <div>
               <p className="font-mono-custom text-xs uppercase text-white/40 tracking-wider">Ambiente</p>
-              <p className={`font-display text-xl font-bold ${isDia ? 'text-sky-400' : 'text-indigo-400'}`}>
-                {isDia ? 'DÍA' : 'NOCHE'}
+              <p className={`font-display text-2xl font-bold ${hayLuz ? 'text-sky-400' : 'text-indigo-400'}`}>
+                {hayLuz ? 'DÍA' : 'NOCHE'}
+              </p>
+              <p className="font-mono-custom text-[11px] text-white/30 mt-0.5">
+                LDR: {data.ldr} / 1024
               </p>
             </div>
           </div>
 
-          {/* LDR */}
-          <div className="flex items-center gap-4 p-5 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm">
-            <Eye className="w-8 h-8 text-neon-cyan flex-shrink-0" />
+          {/* Estado batería/panel */}
+          <div className={`flex items-center gap-4 p-6 rounded-2xl border backdrop-blur-sm ${estadoBg(data.estado)}`}>
+            <div className="flex-shrink-0">
+              <EstadoBateriaIcon estado={data.estado} />
+            </div>
             <div>
-              <p className="font-mono-custom text-xs uppercase text-white/40 tracking-wider">Sensor LDR</p>
-              <p className="font-display text-xl font-bold text-neon-cyan">{data.ldr}</p>
-              <p className="font-mono-custom text-xs text-white/30">
-                {data.ldr > 500 ? 'Mucha luz' : data.ldr > 200 ? 'Luz media' : 'Poca luz'}
+              <p className="font-mono-custom text-xs uppercase text-white/40 tracking-wider">Batería / Panel</p>
+              <p className={`font-display text-2xl font-bold ${estadoColor(data.estado)}`}>
+                {data.estado}
+              </p>
+              <p className="font-mono-custom text-[11px] text-white/30 mt-0.5">
+                {data.estado === 'CARGANDO'    ? 'Panel genera más que batería' :
+                 data.estado === 'EQUILIBRIO'  ? 'Panel ≈ consumo batería' :
+                 data.estado === 'DESCARGANDO' ? 'Batería suministrando energía' :
+                 'Sin datos del circuito'}
               </p>
             </div>
           </div>
         </div>
 
-        {/* ── Gauges PV ── */}
-        <div ref={gaugesRef} className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
-          <div className="flex justify-center">
-            <Gauge value={data.voltage} min={0} max={5} unit="V"
-              label="Voltaje" color="cyan" size="lg" icon={<Zap className="w-5 h-5" />} />
+        {/* ── Stats del historial ── */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-12">
+          <div className="p-5 rounded-2xl border border-white/10 bg-white/5 text-center">
+            <Eye className="w-6 h-6 text-neon-cyan mx-auto mb-2" />
+            <p className="font-mono-custom text-xs text-white/40 uppercase mb-1">LDR Actual</p>
+            <p className="font-display text-2xl text-neon-cyan">{data.ldr}</p>
           </div>
-          <div className="flex justify-center">
-            <Gauge value={data.current_mA} min={0} max={10} unit="mA"
-              label="Corriente" color="blue" size="lg" icon={<Activity className="w-5 h-5" />} />
+          <div className="p-5 rounded-2xl border border-white/10 bg-white/5 text-center">
+            <Eye className="w-6 h-6 text-sky-400 mx-auto mb-2" />
+            <p className="font-mono-custom text-xs text-white/40 uppercase mb-1">LDR Máx</p>
+            <p className="font-display text-2xl text-sky-400">{stats.ldrMax}</p>
           </div>
-          <div className="flex justify-center">
-            <Gauge value={data.power_mW} min={0} max={50} unit="mW"
-              label="Potencia" color="green" size="lg" icon={<Power className="w-5 h-5" />} />
+          <div className="p-5 rounded-2xl border border-white/10 bg-white/5 text-center">
+            <Lightbulb className="w-6 h-6 text-amber-400 mx-auto mb-2" />
+            <p className="font-mono-custom text-xs text-white/40 uppercase mb-1">Encendidos</p>
+            <p className="font-display text-2xl text-amber-400">{stats.totalEncendidos}</p>
+          </div>
+          <div className="p-5 rounded-2xl border border-white/10 bg-white/5 text-center">
+            <Zap className="w-6 h-6 text-emerald-400 mx-auto mb-2" />
+            <p className="font-mono-custom text-xs text-white/40 uppercase mb-1">% Encendido</p>
+            <p className="font-display text-2xl text-emerald-400">{stats.pctEncendido}%</p>
           </div>
         </div>
 
-        {/* ── Stats Widgets ── */}
-        <div ref={widgetsRef} className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-12">
-          <DataWidget title="Voltaje Máx" value={stats.voltageMax.toFixed(2)} unit="V"
-            trend="up" trendValue="Hoy" icon={<TrendingUp className="w-4 h-4" />} color="cyan" />
-          <DataWidget title="Corriente Máx" value={stats.currentMax.toFixed(2)} unit="mA"
-            trend="up" trendValue="Hoy" icon={<TrendingUp className="w-4 h-4" />} color="blue" />
-          <DataWidget title="Potencia Máx" value={stats.powerMax.toFixed(1)} unit="mW"
-            trend="up" trendValue="Hoy" icon={<Sun className="w-4 h-4" />} color="amber" />
-          <DataWidget
-            title="Energía Total"
-            value={(stats.powerTotal / 1000).toFixed(3)}
-            unit="Wh"
-            subtitle="Historial"
-            icon={<Battery className="w-4 h-4" />}
-            color="green"
-            highlight
-          />
-        </div>
-
-        {/* ── Gráficas en Tiempo Real ── */}
-        <div ref={chartsRef} className="space-y-6">
-          <h3 className="font-display text-2xl text-white mb-2 flex items-center gap-3">
+        {/* ── Gráfica LDR en Tiempo Real ── */}
+        <div ref={chartRef} className="space-y-4">
+          <h3 className="font-display text-2xl text-white flex items-center gap-3">
             <Activity className="w-6 h-6 text-neon-cyan" />
-            Gráficos en Tiempo Real
+            LDR en Tiempo Real
             <span className="font-mono-custom text-xs text-white/30 ml-2">
-              ({voltageBuffer.length} puntos · cada 5 s)
+              ({ldrBuffer.length} puntos · cada 5 s)
             </span>
             {!data.circuit_connected && (
               <span className="ml-2 px-2 py-0.5 rounded-full bg-red-500/20 border border-red-500/30 text-red-400 font-mono-custom text-xs">
-                circuito desconectado — mostrando 0
+                circuito desconectado
               </span>
             )}
           </h3>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="p-6 rounded-2xl bg-void-dark/50 border border-white/10 backdrop-blur-sm">
-              <RealTimeChart data={voltageBuffer} label="Voltaje" unit="V" color="cyan" height={200} minValue={0} maxValue={5} />
-            </div>
-            <div className="p-6 rounded-2xl bg-void-dark/50 border border-white/10 backdrop-blur-sm">
-              <RealTimeChart data={currentBuffer} label="Corriente" unit="mA" color="blue" height={200} minValue={0} maxValue={10} />
-            </div>
-          </div>
-
           <div className="p-6 rounded-2xl bg-void-dark/50 border border-white/10 backdrop-blur-sm">
-            <RealTimeChart data={powerBuffer} label="Potencia" unit="mW" color="green" height={200} minValue={0} maxValue={50} />
+            <RealTimeChart
+              data={ldrBuffer}
+              label="Sensor LDR"
+              unit=""
+              color="amber"
+              height={220}
+              minValue={0}
+              maxValue={1024}
+            />
           </div>
-
-          <div className="p-6 rounded-2xl bg-void-dark/50 border border-white/10 backdrop-blur-sm">
-            <RealTimeChart data={ldrBuffer} label="LDR (Luminosidad)" unit="" color="amber" height={160} minValue={0} maxValue={1024} />
-          </div>
+          <p className="font-mono-custom text-xs text-white/30 text-center">
+            Valor alto = poca luz · Valor bajo = mucha luz solar · Umbral encendido LED: &lt; 400
+          </p>
         </div>
 
       </div>

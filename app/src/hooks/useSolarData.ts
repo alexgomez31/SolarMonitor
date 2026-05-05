@@ -10,18 +10,14 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 // =============================================================================
 
 export interface SolarData {
-  voltage: number;
-  current: number;
-  current_mA: number;
-  power: number;
-  power_mW: number;
+  // Datos reales del Arduino
   ldr: number;
-  led: string;
-  ambiente: string;
+  estadoLDR: string;   // "ENCENDIDO" | "APAGADO"
+  estado: string;      // "CARGANDO" | "EQUILIBRIO" | "DESCARGANDO" | "DESCONOCIDO"
   hora: string | null;
   // Timestamps
-  server_timestamp:  string | null;   // cuándo el backend habló con Firebase
-  circuit_timestamp: string | null;   // cuándo el circuito envió el último dato
+  server_timestamp:  string | null;
+  circuit_timestamp: string | null;
   // Flags de conexión
   firebase_connected: boolean;
   circuit_connected:  boolean;
@@ -47,14 +43,9 @@ export interface SystemStatus {
 
 export interface HistoryData {
   timestamp: string;
-  voltage: number;
-  current: number;
-  current_mA: number;
-  power: number;
-  power_mW: number;
   ldr: number;
-  led: string;
-  ambiente: string;
+  estadoLDR: string;
+  estado: string;
   hora: string;
   fecha: string;
 }
@@ -62,20 +53,16 @@ export interface HistoryData {
 export interface DayReading {
   timestamp:  string;
   hora:       string;
-  voltage:    number;
-  current_mA: number;
-  power_mW:   number;
   ldr:        number;
-  led:        string;
+  estadoLDR:  string;
+  estado:     string;
 }
 
 export interface DayStats {
   fecha:      string;
   count:      number;
-  voltage:    { max: number; avg: number };
-  current_mA: { max: number; avg: number };
-  power_mW:   { max: number; avg: number };
   ldr:        { max: number; avg: number };
+  encendidos: number;
   readings:   DayReading[];
 }
 
@@ -121,9 +108,9 @@ const REALTIME_BUFFER   = 120;    // 4 min de puntos (120 × 5 s)
 
 export function useSolarData() {
   const [data, setData] = useState<SolarData>({
-    voltage: 0, current: 0, current_mA: 0,
-    power: 0, power_mW: 0, ldr: 0,
-    led: 'APAGADO', ambiente: 'NOCHE',
+    ldr: 0,
+    estadoLDR: 'APAGADO',
+    estado: 'DESCONOCIDO',
     hora: null,
     server_timestamp: null, circuit_timestamp: null,
     firebase_connected: false, circuit_connected: false,
@@ -183,37 +170,15 @@ export function useSolarData() {
 // =============================================================================
 
 export function useRealtimeBuffer(data: SolarData) {
-  const [voltageBuffer,  setVoltageBuffer]  = useState<RealtimePoint[]>([]);
-  const [currentBuffer,  setCurrentBuffer]  = useState<RealtimePoint[]>([]);
-  const [powerBuffer,    setPowerBuffer]    = useState<RealtimePoint[]>([]);
-  const [ldrBuffer,      setLdrBuffer]      = useState<RealtimePoint[]>([]);
+  const [ldrBuffer, setLdrBuffer] = useState<RealtimePoint[]>([]);
 
   useEffect(() => {
     const ts = new Date().toISOString();
-
-    const addPoint = (
-      setter: (fn: (prev: RealtimePoint[]) => RealtimePoint[]) => void,
-      value: number
-    ) => {
-      setter((prev: RealtimePoint[]) => {
-        const next = [...prev, { timestamp: ts, value }];
-        return next.slice(-REALTIME_BUFFER);
-      });
-    };
-
-    // Si el circuito está desconectado, acumular ceros
-    const v  = data.circuit_connected ? data.voltage    : 0;
-    const mA = data.circuit_connected ? data.current_mA : 0;
-    const mW = data.circuit_connected ? data.power_mW   : 0;
-    const l  = data.circuit_connected ? data.ldr        : 0;
-
-    addPoint(setVoltageBuffer, v);
-    addPoint(setCurrentBuffer, mA);
-    addPoint(setPowerBuffer,   mW);
-    addPoint(setLdrBuffer,     l);
+    const ldrVal = data.circuit_connected ? data.ldr : 0;
+    setLdrBuffer(prev => [...prev, { timestamp: ts, value: ldrVal }].slice(-REALTIME_BUFFER));
   }, [data.server_timestamp]);
 
-  return { voltageBuffer, currentBuffer, powerBuffer, ldrBuffer };
+  return { ldrBuffer };
 }
 
 // =============================================================================
@@ -310,33 +275,19 @@ export function useLedAnalysis() {
 // HOOK - Estadísticas (sobre historial)
 // =============================================================================
 
-export function useSolarStats(data: SolarData, history: HistoryData[]) {
+export function useSolarStats(_data: SolarData, history: HistoryData[]) {
   const stats = {
-    voltageMax: 0, voltageMin: 0, voltageAvg: 0,
-    currentMax: 0, currentMin: 0, currentAvg: 0,
-    powerMax:   0, powerMin:   0, powerAvg:   0,
-    powerTotal: 0, efficiency: 0,
+    ldrMax: 0, ldrMin: 0, ldrAvg: 0,
+    totalEncendidos: 0, pctEncendido: 0,
   };
 
   if (history.length > 0) {
-    const voltages = history.map(h => h.voltage);
-    const currents = history.map(h => h.current_mA);
-    const powers   = history.map(h => h.power_mW);
-
-    stats.voltageMax = Math.max(...voltages);
-    stats.voltageMin = Math.min(...voltages);
-    stats.voltageAvg = voltages.reduce((a, b) => a + b, 0) / voltages.length;
-
-    stats.currentMax = Math.max(...currents);
-    stats.currentMin = Math.min(...currents);
-    stats.currentAvg = currents.reduce((a, b) => a + b, 0) / currents.length;
-
-    stats.powerMax  = Math.max(...powers);
-    stats.powerMin  = Math.min(...powers);
-    stats.powerAvg  = powers.reduce((a, b) => a + b, 0) / powers.length;
-    stats.powerTotal = powers.reduce((a, b) => a + b, 0);
-
-    stats.efficiency = data.power_mW > 0 ? Math.min((data.power_mW / 50) * 100, 100) : 0;
+    const ldrs = history.map(h => h.ldr);
+    stats.ldrMax = Math.max(...ldrs);
+    stats.ldrMin = Math.min(...ldrs);
+    stats.ldrAvg = ldrs.reduce((a, b) => a + b, 0) / ldrs.length;
+    stats.totalEncendidos = history.filter(h => h.estadoLDR === 'ENCENDIDO').length;
+    stats.pctEncendido = Math.round((stats.totalEncendidos / history.length) * 100);
   }
 
   return stats;

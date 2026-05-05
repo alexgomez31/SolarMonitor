@@ -7,7 +7,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import {
-  Lightbulb, Moon, Sun, Clock, BarChart2, ChevronDown, ChevronUp, RefreshCw,
+  Lightbulb, Moon, CloudSun, Clock, BarChart2, ChevronDown, ChevronUp, RefreshCw,
 } from 'lucide-react';
 
 import { useLedAnalysis, useSolarData } from '../hooks/useSolarData';
@@ -133,7 +133,7 @@ const DayCard: React.FC<{
         <div className="flex items-center gap-3">
           {data.total_encendido_min > 0 && (
             <div className="hidden sm:flex items-center gap-1 px-3 py-1 rounded-full bg-amber-400/10 border border-amber-400/20">
-              <Sun className="w-3 h-3 text-amber-400" />
+              <Lightbulb className="w-3 h-3 text-amber-400" />
               <span className="font-mono-custom text-xs text-amber-400">
                 {duracionLabel(data.total_encendido_min)} enc.
               </span>
@@ -224,9 +224,9 @@ const LucesSection: React.FC = () => {
   const { data }                 = useSolarData();
   const { analysis, loading, refresh } = useLedAnalysis();
 
-  const ledOn  = data.led?.toUpperCase().includes('ENCENDIDO');
-  const isDia  = data.ambiente?.toUpperCase().includes('DIA');
-  const days   = Object.keys(analysis).sort().reverse(); // más reciente primero
+  const ledOn  = data.estadoLDR?.toUpperCase().includes('ENCENDIDO');
+  const hayLuz = data.ldr < 400;  // LDR bajo = hay luz solar
+  const days   = Object.keys(analysis).sort().reverse();
 
   // Totales globales
   const totalEncendidos    = days.reduce((s, d) => s + (analysis[d]?.encendidos_count ?? 0), 0);
@@ -294,10 +294,10 @@ const LucesSection: React.FC = () => {
 
           {/* Ambiente */}
           <div className="flex flex-col items-center justify-center p-5 rounded-2xl border border-white/10 bg-white/5">
-            {isDia ? <Sun className="w-8 h-8 text-sky-400 mb-2" /> : <Moon className="w-8 h-8 text-indigo-400 mb-2" />}
+            {hayLuz ? <CloudSun className="w-8 h-8 text-sky-400 mb-2" /> : <Moon className="w-8 h-8 text-indigo-400 mb-2" />}
             <p className="font-mono-custom text-xs text-white/40 uppercase">Ambiente</p>
-            <p className={`font-display text-lg font-bold ${isDia ? 'text-sky-400' : 'text-indigo-400'}`}>
-              {isDia ? 'DÍA' : 'NOCHE'}
+            <p className={`font-display text-lg font-bold ${hayLuz ? 'text-sky-400' : 'text-indigo-400'}`}>
+              {hayLuz ? 'DÍA' : 'NOCHE'}
             </p>
           </div>
 
