@@ -129,59 +129,79 @@ def fetch_data_from_firebase():
     now = datetime.now()
 
     try:
-        resp = requests.get(f"{FIREBASE_URL}/lecturas.json", timeout=8)
-        _state["firebase_checked_at"] = now
-
-        if resp.status_code == 200:
-            _state["firebase_ok"] = True
-            lecturas = resp.json()
-            latest, fecha = get_latest_with_date(lecturas)
-
-            if latest and fecha:
-                hora_str = latest["hora"] or "00:00:00"
-                circuit_dt = circuit_datetime_from(fecha, hora_str)
-
-                # ¿El circuito sigue enviando datos?
-                if circuit_dt:
-                    elapsed = (now - circuit_dt).total_seconds()
-                    circuit_alive = elapsed <= CIRCUIT_TIMEOUT_SEC
-                else:
-                    circuit_alive = False
-
-                _state["circuit_ok"]         = circuit_alive
-                _state["circuit_last_seen"]  = circuit_dt
-                _state["circuit_last_hora"]  = hora_str
-                _state["circuit_last_fecha"] = fecha
-
-                # Actualizar cache
-                if circuit_alive:
-                    # Circuito activo → mostrar valores reales del Arduino
-                    data_cache.update({
-                        "ldr":       latest["ldr"],
-                        "estadoLDR": latest["estadoLDR"],
-                        "estado":    latest["estado"],
-                        "hora":      hora_str,
-                    })
-                    print(f"[OK] circuito vivo ({elapsed:.0f}s) LDR={data_cache['ldr']} estadoLDR={data_cache['estadoLDR']} estado={data_cache['estado']}")
-                else:
-                    # Circuito silencioso → poner valores en reposo
-                    data_cache.update({
-                        "ldr": 0, "estadoLDR": "APAGADO",
-                        "estado": "DESCONOCIDO", "hora": hora_str,
-                    })
-                    print(f"[WARN] circuito silencioso hace {elapsed:.0f}s — valores en reposo")
-            else:
-                _state["circuit_ok"] = False
-                print("[WARN] Sin registros válidos en Firebase")
-        else:
+        # 1. Obtener la fecha más reciente (usando shallow para no descargar datos)
+        # Esto devuelve un dict con las fechas como llaves y true como valor
+        resp_shallow = requests.get(f"{FIREBASE_URL}/lecturas.json?shallow=true", timeout=8)
+        if resp_shallow.status_code != 200:
             _state["firebase_ok"] = False
-            _state["circuit_ok"]  = False
-            print(f"[ERROR] Firebase HTTP {resp.status_code}")
+            print(f"[ERROR] Firebase Shallow HTTP {resp_shallow.status_code}")
+            return
+
+        _state["firebase_ok"] = True
+        _state["firebase_checked_at"] = now
+        dates = resp_shallow.json()
+
+        if not dates or not isinstance(dates, dict):
+            _state["circuit_ok"] = False
+            print("[WARN] No hay fechas en 'lecturas'")
+            return
+
+        # Encontrar la fecha más reciente (llave mayor)
+        latest_date = sorted(dates.keys())[-1]
+
+        # 2. Obtener SOLO el último registro de esa fecha
+        resp_latest = requests.get(
+            f"{FIREBASE_URL}/lecturas/{latest_date}.json?orderBy=\"$key\"&limitToLast=1",
+            timeout=8
+        )
+
+        if resp_latest.status_code == 200:
+            latest_day_data = resp_latest.json()
+            if not latest_day_data or not isinstance(latest_day_data, dict):
+                _state["circuit_ok"] = False
+                return
+
+            # Firebase con limitToLast devuelve un dict { "push_id": { ...data... } }
+            push_id = list(latest_day_data.keys())[0]
+            record = latest_day_data[push_id]
+            latest = parse_reading(record)
+            fecha = latest_date
+
+            hora_str = latest["hora"] or "00:00:00"
+            circuit_dt = circuit_datetime_from(fecha, hora_str)
+
+            # ¿El circuito sigue enviando datos?
+            if circuit_dt:
+                elapsed = (now - circuit_dt).total_seconds()
+                circuit_alive = elapsed <= CIRCUIT_TIMEOUT_SEC
+            else:
+                circuit_alive = False
+
+            _state["circuit_ok"]         = circuit_alive
+            _state["circuit_last_seen"]  = circuit_dt
+            _state["circuit_last_hora"]  = hora_str
+            _state["circuit_last_fecha"] = fecha
+
+            # Actualizar cache
+            if circuit_alive:
+                data_cache.update({
+                    "ldr":       latest["ldr"],
+                    "estadoLDR": latest["estadoLDR"],
+                    "estado":    latest["estado"],
+                    "hora":      hora_str,
+                })
+            else:
+                data_cache.update({
+                    "ldr": 0, "estadoLDR": "APAGADO",
+                    "estado": "DESCONOCIDO", "hora": hora_str,
+                })
+        else:
+            print(f"[ERROR] Firebase Latest HTTP {resp_latest.status_code}")
 
     except Exception as exc:
         _state["firebase_ok"] = False
         _state["circuit_ok"]  = False
-        print(f"[ERROR] Firebase: {exc}")
+        print(f"[ERROR] Firebase optimization: {exc}")
 
     # Timestamps y flags para el frontend
     circuit_dt = _state.get("circuit_last_seen")
@@ -213,23 +233,30 @@ fetcher_thread.start()
 # HELPERS — CARGA DE DATOS HISTÓRICOS
 # =============================================================================
 
-def load_all_history() -> list:
-    """Carga TODO el historial de Firebase y retorna lista de dicts ordenada."""
+def load_all_history(limit_days=3) -> list:
+    """Carga el historial reciente de Firebase (últimos N días por defecto) para optimizar consumo."""
     try:
-        resp = requests.get(f"{FIREBASE_URL}/lecturas.json", timeout=12)
-        if resp.status_code != 200:
+        # 1. Obtener lista de fechas
+        resp_shallow = requests.get(f"{FIREBASE_URL}/lecturas.json?shallow=true", timeout=8)
+        if resp_shallow.status_code != 200:
             return []
-        lecturas = resp.json()
-        if not lecturas or not isinstance(lecturas, dict):
-            return []
+        
+        dates = sorted(resp_shallow.json().keys())
+        # Tomar solo los últimos N días
+        recent_dates = dates[-limit_days:]
+        
         history = []
-        for day_key in sorted(lecturas.keys()):
-            day_data = lecturas[day_key]
-            if not isinstance(day_data, dict):
+        for day_key in recent_dates:
+            resp_day = requests.get(f"{FIREBASE_URL}/lecturas/{day_key}.json", timeout=8)
+            if resp_day.status_code != 200:
                 continue
+            
+            day_data = resp_day.json()
+            if not day_data or not isinstance(day_data, dict):
+                continue
+                
             for push_id in sorted(day_data.keys()):
                 record = day_data[push_id]
-                # El Arduino manda registros con campo 'hora'
                 if not isinstance(record, dict) or "hora" not in record:
                     continue
                 r = parse_reading(record)
@@ -249,6 +276,10 @@ def load_all_history() -> list:
                     "estado":      r["estado"],
                 })
         return history
+    except Exception as exc:
+        print(f"[IA] Error cargando historial optimizado: {exc}")
+        return []
+
     except Exception as exc:
         print(f"[IA] Error cargando historial: {exc}")
         return []
@@ -559,36 +590,47 @@ def get_status():
 
 @app.route("/api/history")
 def get_history():
-    """Historial completo de Firebase organizado cronológicamente."""
+    """Historial limitado (últimos 200 registros) para reducir transferencia."""
     try:
-        resp = requests.get(f"{FIREBASE_URL}/lecturas.json", timeout=10)
+        # Para simplificar, obtenemos la última fecha y sus registros
+        resp_shallow = requests.get(f"{FIREBASE_URL}/lecturas.json?shallow=true", timeout=8)
+        if resp_shallow.status_code != 200:
+            return jsonify([])
+            
+        dates = sorted(resp_shallow.json().keys())
+        if not dates:
+            return jsonify([])
+            
+        latest_date = dates[-1]
+        resp_latest = requests.get(f"{FIREBASE_URL}/lecturas/{latest_date}.json?limitToLast=200", timeout=10)
+        
         history = []
-        if resp.status_code == 200:
-            lecturas = resp.json()
-            if lecturas and isinstance(lecturas, dict):
-                for day_key in sorted(lecturas.keys()):
-                    day_data = lecturas[day_key]
-                    if not isinstance(day_data, dict):
+        if resp_latest.status_code == 200:
+            day_data = resp_latest.json()
+            if day_data and isinstance(day_data, dict):
+                for push_id in sorted(day_data.keys()):
+                    record = day_data[push_id]
+                    if not isinstance(record, dict) or "hora" not in record:
                         continue
-                    for push_id in sorted(day_data.keys()):
-                        record = day_data[push_id]
-                        if not isinstance(record, dict) or "hora" not in record:
-                            continue
-                        r = parse_reading(record)
-                        hora = r["hora"] or "00:00:00"
-                        try:
-                            ts = datetime.strptime(f"{day_key} {hora}", "%Y-%m-%d %H:%M:%S").isoformat()
-                        except ValueError:
-                            ts = f"{day_key}T{hora}"
-                        history.append({
-                            "timestamp":  ts,
-                            "ldr":        r["ldr"],
-                            "estadoLDR":  r["estadoLDR"],
-                            "estado":     r["estado"],
-                            "hora":       hora,
-                            "fecha":      day_key,
-                        })
+                    r = parse_reading(record)
+                    hora = r["hora"] or "00:00:00"
+                    try:
+                        ts = datetime.strptime(f"{latest_date} {hora}", "%Y-%m-%d %H:%M:%S").isoformat()
+                    except ValueError:
+                        ts = f"{latest_date}T{hora}"
+                    history.append({
+                        "timestamp":  ts,
+                        "ldr":        r["ldr"],
+                        "estadoLDR":  r["estadoLDR"],
+                        "estado":     r["estado"],
+                        "hora":       hora,
+                        "fecha":      latest_date,
+                    })
         return jsonify(history)
+    except Exception as exc:
+        print(f"[History] Error: {exc}")
+        return jsonify([])
+
     except Exception as exc:
         print(f"[History] Error: {exc}")
         return jsonify([])
@@ -596,57 +638,68 @@ def get_history():
 
 @app.route("/api/daily-summary")
 def get_daily_summary():
-    """Resumen estadístico por día (LDR, estadoLDR, estado)."""
+    """Resumen estadístico de los últimos 7 días."""
     try:
-        resp = requests.get(f"{FIREBASE_URL}/lecturas.json", timeout=10)
+        resp_shallow = requests.get(f"{FIREBASE_URL}/lecturas.json?shallow=true", timeout=8)
+        if resp_shallow.status_code != 200:
+            return jsonify({})
+            
+        all_dates = sorted(resp_shallow.json().keys())
+        recent_dates = all_dates[-7:] # Última semana
+        
         result = {}
-        if resp.status_code == 200:
-            lecturas = resp.json()
-            if lecturas and isinstance(lecturas, dict):
-                for day_key in sorted(lecturas.keys()):
-                    day_data = lecturas[day_key]
-                    if not isinstance(day_data, dict):
-                        continue
+        for day_key in recent_dates:
+            resp_day = requests.get(f"{FIREBASE_URL}/lecturas/{day_key}.json", timeout=10)
+            if resp_day.status_code != 200:
+                continue
+                
+            day_data = resp_day.json()
+            if not day_data or not isinstance(day_data, dict):
+                continue
 
-                    ldrs, encendidos = [], 0
-                    readings_list = []
+            ldrs, encendidos = [], 0
+            readings_list = []
 
-                    for push_id in sorted(day_data.keys()):
-                        record = day_data[push_id]
-                        if not isinstance(record, dict) or "hora" not in record:
-                            continue
-                        r = parse_reading(record)
-                        hora = r["hora"] or "00:00:00"
-                        try:
-                            ts = datetime.strptime(f"{day_key} {hora}", "%Y-%m-%d %H:%M:%S").isoformat()
-                        except ValueError:
-                            ts = f"{day_key}T{hora}"
+            for push_id in sorted(day_data.keys()):
+                record = day_data[push_id]
+                if not isinstance(record, dict) or "hora" not in record:
+                    continue
+                r = parse_reading(record)
+                hora = r["hora"] or "00:00:00"
+                try:
+                    ts = datetime.strptime(f"{day_key} {hora}", "%Y-%m-%d %H:%M:%S").isoformat()
+                except ValueError:
+                    ts = f"{day_key}T{hora}"
 
-                        ldrs.append(r["ldr"])
-                        if r["estadoLDR"] == "ENCENDIDO":
-                            encendidos += 1
-                        readings_list.append({
-                            "timestamp":  ts,
-                            "hora":       hora,
-                            "ldr":        r["ldr"],
-                            "estadoLDR":  r["estadoLDR"],
-                            "estado":     r["estado"],
-                        })
+                ldrs.append(r["ldr"])
+                if r["estadoLDR"] == "ENCENDIDO":
+                    encendidos += 1
+                readings_list.append({
+                    "timestamp":  ts,
+                    "hora":       hora,
+                    "ldr":        r["ldr"],
+                    "estadoLDR":  r["estadoLDR"],
+                    "estado":     r["estado"],
+                })
 
-                    if not ldrs:
-                        continue
+            if not ldrs:
+                continue
 
-                    def safe_max(lst): return round(max(lst), 1) if lst else 0
-                    def safe_avg(lst): return round(sum(lst)/len(lst), 1) if lst else 0
+            def safe_max(lst): return round(max(lst), 1) if lst else 0
+            def safe_avg(lst): return round(sum(lst)/len(lst), 1) if lst else 0
 
-                    result[day_key] = {
-                        "fecha":      day_key,
-                        "count":      len(ldrs),
-                        "ldr":        {"max": safe_max(ldrs), "avg": safe_avg(ldrs)},
-                        "encendidos": encendidos,
-                        "readings":   readings_list,
-                    }
+            result[day_key] = {
+                "fecha":      day_key,
+                "count":      len(ldrs),
+                "ldr":        {"max": safe_max(ldrs), "avg": safe_avg(ldrs)},
+                "encendidos": encendidos,
+                "readings":   readings_list,
+            }
         return jsonify(result)
+    except Exception as exc:
+        print(f"[DailySummary] Error: {exc}")
+        return jsonify({})
+
     except Exception as exc:
         print(f"[DailySummary] Error: {exc}")
         return jsonify({})
@@ -654,20 +707,23 @@ def get_daily_summary():
 
 @app.route("/api/led-analysis")
 def get_led_analysis():
-    """Análisis del LED (ENCENDIDO/APAGADO) por segmentos y por día."""
+    """Análisis del LED de los últimos 7 días."""
     try:
-        resp = requests.get(f"{FIREBASE_URL}/lecturas.json", timeout=10)
+        resp_shallow = requests.get(f"{FIREBASE_URL}/lecturas.json?shallow=true", timeout=8)
+        if resp_shallow.status_code != 200:
+            return jsonify({})
+            
+        all_dates = sorted(resp_shallow.json().keys())
+        recent_dates = all_dates[-7:]
+        
         result = {}
-        if resp.status_code != 200:
-            return jsonify({})
-
-        lecturas = resp.json()
-        if not lecturas or not isinstance(lecturas, dict):
-            return jsonify({})
-
-        for day_key in sorted(lecturas.keys()):
-            day_data = lecturas[day_key]
-            if not isinstance(day_data, dict):
+        for day_key in recent_dates:
+            resp_day = requests.get(f"{FIREBASE_URL}/lecturas/{day_key}.json", timeout=10)
+            if resp_day.status_code != 200:
+                continue
+                
+            day_data = resp_day.json()
+            if not day_data or not isinstance(day_data, dict):
                 continue
 
             readings = []
@@ -676,7 +732,6 @@ def get_led_analysis():
                 if not isinstance(record, dict) or "hora" not in record:
                     continue
                 hora_str   = record.get("hora", "00:00:00")
-                # Usa estadoLDR que es lo que manda el Arduino
                 led_val    = str(record.get("estadoLDR", "APAGADO")).upper()
                 led_norm   = "ENCENDIDO" if "ENCENDIDO" in led_val else "APAGADO"
                 try:
@@ -725,6 +780,10 @@ def get_led_analysis():
             }
 
         return jsonify(result)
+    except Exception as exc:
+        print(f"[LedAnalysis] Error: {exc}")
+        return jsonify({})
+
     except Exception as exc:
         print(f"[LedAnalysis] Error: {exc}")
         return jsonify({})
