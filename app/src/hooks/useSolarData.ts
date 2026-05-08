@@ -9,12 +9,20 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 // INTERFACES
 // =============================================================================
 
+export interface PowerData {
+  voltaje_V: number;
+  corriente_mA: number;
+  potencia_mW: number;
+}
+
 export interface SolarData {
   // Datos reales del Arduino
   ldr: number;
   estadoLDR: string;   // "ENCENDIDO" | "APAGADO"
   estado: string;      // "CARGANDO" | "EQUILIBRIO" | "DESCARGANDO" | "DESCONOCIDO"
   hora: string | null;
+  panel: PowerData;
+  bateria: PowerData;
   // Timestamps
   server_timestamp:  string | null;
   circuit_timestamp: string | null;
@@ -48,6 +56,8 @@ export interface HistoryData {
   estado: string;
   hora: string;
   fecha: string;
+  panel: PowerData;
+  bateria: PowerData;
 }
 
 export interface DayReading {
@@ -56,6 +66,8 @@ export interface DayReading {
   ldr:        number;
   estadoLDR:  string;
   estado:     string;
+  panel:      PowerData;
+  bateria:    PowerData;
 }
 
 export interface DayStats {
@@ -112,6 +124,8 @@ export function useSolarData() {
     estadoLDR: 'APAGADO',
     estado: 'DESCONOCIDO',
     hora: null,
+    panel:   { voltaje_V: 0, corriente_mA: 0, potencia_mW: 0 },
+    bateria: { voltaje_V: 0, corriente_mA: 0, potencia_mW: 0 },
     server_timestamp: null, circuit_timestamp: null,
     firebase_connected: false, circuit_connected: false,
     connected: false, polling_active: true, timestamp: null,
@@ -171,14 +185,23 @@ export function useSolarData() {
 
 export function useRealtimeBuffer(data: SolarData) {
   const [ldrBuffer, setLdrBuffer] = useState<RealtimePoint[]>([]);
+  const [panelVBuffer, setPanelVBuffer] = useState<RealtimePoint[]>([]);
+  const [batteryVBuffer, setBatteryVBuffer] = useState<RealtimePoint[]>([]);
 
   useEffect(() => {
     const ts = new Date().toISOString();
-    const ldrVal = data.circuit_connected ? data.ldr : 0;
+    const isOk = data.circuit_connected;
+    
+    const ldrVal = isOk ? data.ldr : 0;
+    const pVVal = isOk ? data.panel.voltaje_V : 0;
+    const bVVal = isOk ? data.bateria.voltaje_V : 0;
+
     setLdrBuffer(prev => [...prev, { timestamp: ts, value: ldrVal }].slice(-REALTIME_BUFFER));
+    setPanelVBuffer(prev => [...prev, { timestamp: ts, value: pVVal }].slice(-REALTIME_BUFFER));
+    setBatteryVBuffer(prev => [...prev, { timestamp: ts, value: bVVal }].slice(-REALTIME_BUFFER));
   }, [data.server_timestamp]);
 
-  return { ldrBuffer };
+  return { ldrBuffer, panelVBuffer, batteryVBuffer };
 }
 
 // =============================================================================

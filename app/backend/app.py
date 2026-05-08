@@ -65,6 +65,8 @@ data_cache = {
     "estadoLDR":  "APAGADO",  # estado calculado del LED: ENCENDIDO | APAGADO
     "estado":     "DESCONOCIDO",  # estado batería/panel: CARGANDO | EQUILIBRIO | DESCARGANDO | DESCONOCIDO
     "hora":       None,
+    "panel":      {"voltaje_V": 0, "corriente_mA": 0, "potencia_mW": 0},
+    "bateria":    {"voltaje_V": 0, "corriente_mA": 0, "potencia_mW": 0},
 
     # Timestamps
     "server_timestamp":  None,   # cuándo el backend hizo la última consulta HTTP a Firebase
@@ -89,11 +91,23 @@ def parse_reading(record: dict) -> dict:
     """Parsea un registro tal como lo envía el Arduino:
        { hora, ldr, estadoLDR, estado }
     """
+    panel = record.get("panel", {})
+    bateria = record.get("bateria", {})
     return {
         "ldr":       int(record.get("ldr",        0)),
         "estadoLDR": str(record.get("estadoLDR",  "APAGADO")),
         "estado":    str(record.get("estado",     "DESCONOCIDO")),
         "hora":      record.get("hora", None),
+        "panel": {
+            "voltaje_V": float(panel.get("voltaje_V", 0)),
+            "corriente_mA": float(panel.get("corriente_mA", 0)),
+            "potencia_mW": float(panel.get("potencia_mW", 0)),
+        },
+        "bateria": {
+            "voltaje_V": float(bateria.get("voltaje_V", 0)),
+            "corriente_mA": float(bateria.get("corriente_mA", 0)),
+            "potencia_mW": float(bateria.get("potencia_mW", 0)),
+        }
     }
 
 
@@ -189,11 +203,15 @@ def fetch_data_from_firebase():
                     "estadoLDR": latest["estadoLDR"],
                     "estado":    latest["estado"],
                     "hora":      hora_str,
+                    "panel":     latest["panel"],
+                    "bateria":   latest["bateria"],
                 })
             else:
                 data_cache.update({
                     "ldr": 0, "estadoLDR": "APAGADO",
                     "estado": "DESCONOCIDO", "hora": hora_str,
+                    "panel": {"voltaje_V": 0, "corriente_mA": 0, "potencia_mW": 0},
+                    "bateria": {"voltaje_V": 0, "corriente_mA": 0, "potencia_mW": 0},
                 })
         else:
             print(f"[ERROR] Firebase Latest HTTP {resp_latest.status_code}")

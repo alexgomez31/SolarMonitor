@@ -255,28 +255,28 @@ export default function AISection() {
               <span className="ai-kpi__value" style={{ color: analysis.health_score.color }}>
                 {analysis.health_score.score}
               </span>
-              <span className="ai-kpi__label">Score de Salud</span>
+              <span className="ai-kpi__label">Salud del Sistema</span>
+            </div>
+            <div className="ai-kpi" style={{ "--accent": "#10B981" } as any}>
+              <span className="ai-kpi__icon">🔋</span>
+              <span className="ai-kpi__value" style={{ color: "#10B981" }}>
+                {analysis.health_score.autonomy_hrs}h
+              </span>
+              <span className="ai-kpi__label">Autonomía Est.</span>
+            </div>
+            <div className="ai-kpi" style={{ "--accent": "#00D4FF" } as any}>
+              <span className="ai-kpi__icon">⚡</span>
+              <span className="ai-kpi__value" style={{ color: "#00D4FF" }}>
+                {analysis.health_score.avg_efficiency}%
+              </span>
+              <span className="ai-kpi__label">Eficiencia Prom.</span>
             </div>
             <div className="ai-kpi" style={{ "--accent": "#F59E0B" } as any}>
               <span className="ai-kpi__icon">⚠️</span>
               <span className="ai-kpi__value" style={{ color: "#F59E0B" }}>
                 {analysis.anomaly_detection.total}
               </span>
-              <span className="ai-kpi__label">Anomalías ({analysis.anomaly_detection.pct}%)</span>
-            </div>
-            <div className="ai-kpi" style={{ "--accent": "#00D4FF" } as any}>
-              <span className="ai-kpi__icon">🔮</span>
-              <span className="ai-kpi__value" style={{ color: "#00D4FF" }}>
-                {analysis.power_prediction.model_score_pct ?? 0}%
-              </span>
-              <span className="ai-kpi__label">Precisión del Modelo</span>
-            </div>
-            <div className="ai-kpi" style={{ "--accent": "#A78BFA" } as any}>
-              <span className="ai-kpi__icon">📈</span>
-              <span className="ai-kpi__value" style={{ color: "#A78BFA", fontSize: "1rem" }}>
-                {analysis.trend_analysis.trend_label}
-              </span>
-              <span className="ai-kpi__label">Tendencia General</span>
+              <span className="ai-kpi__label">Anomalías</span>
             </div>
           </div>
 

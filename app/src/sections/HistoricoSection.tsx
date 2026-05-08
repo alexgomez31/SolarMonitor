@@ -7,7 +7,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import {
-  BarChart2, TrendingUp, Eye, Lightbulb, RefreshCw, ChevronDown, ChevronUp,
+  BarChart2, TrendingUp, Eye, RefreshCw, ChevronDown, ChevronUp, Sun,
 } from 'lucide-react';
 import { useDailySummary, useLedAnalysis } from '../hooks/useSolarData';
 import type { DayStats, LedSegment } from '../hooks/useSolarData';
@@ -166,7 +166,7 @@ const DayCard: React.FC<{
           </span>
           {(stats.encendidos ?? 0) > 0 && (
             <span className="hidden sm:flex items-center gap-1 px-2 py-0.5 rounded-full bg-yellow-400/10 border border-yellow-400/20 font-mono-custom text-[10px] text-yellow-400">
-              <Lightbulb className="w-2.5 h-2.5" /> {stats.encendidos}× enc.
+              <Sun className="w-2.5 h-2.5" /> {stats.encendidos}× sol
             </span>
           )}
           {open ? <ChevronUp className="w-4 h-4 text-white/40" /> : <ChevronDown className="w-4 h-4 text-white/40" />}
@@ -186,7 +186,7 @@ const DayCard: React.FC<{
               <p className="font-display text-xl text-amber-400/70">{stats.ldr.avg}</p>
             </div>
             <div className="p-3 rounded-xl bg-white/5 border border-white/10 text-center">
-              <p className="font-mono-custom text-[10px] text-white/40 uppercase mb-1">Encendidos</p>
+              <p className="font-mono-custom text-[10px] text-white/40 uppercase mb-1">Periodos Sol</p>
               <p className="font-display text-xl text-yellow-400">{stats.encendidos ?? 0}</p>
             </div>
           </div>
@@ -194,9 +194,9 @@ const DayCard: React.FC<{
           {/* LED info */}
           {ledData && (
             <div className="flex items-center gap-4 mb-4 p-3 rounded-xl bg-amber-400/5 border border-amber-400/15">
-              <Lightbulb className="w-5 h-5 text-amber-400 flex-shrink-0" />
+              <Sun className="w-5 h-5 text-amber-400 flex-shrink-0" />
               <span className="font-mono-custom text-xs text-white/60">
-                Luces encendidas <strong className="text-amber-400">{ledData.encendidos_count} veces</strong>
+                Sol detectado <strong className="text-amber-400">{ledData.encendidos_count} veces</strong>
                 {' '}· tiempo total: <strong className="text-amber-400">{durLabel(ledData.total_encendido_min)}</strong>
               </span>
             </div>
@@ -207,7 +207,7 @@ const DayCard: React.FC<{
             <p className="font-mono-custom text-xs text-white/40 uppercase mb-2 flex items-center gap-2">
               <Eye className="w-3 h-3 text-amber-400" />
               LDR a lo largo del día
-              <span className="ml-1 text-amber-400">● ENCENDIDO</span>
+              <span className="ml-1 text-amber-400">● DÍA/SOL</span>
             </p>
             <div className="rounded-xl bg-void-black/40 p-3 border border-white/5">
               <LdrLineChart readings={stats.readings} height={200} />
@@ -267,7 +267,7 @@ const HistoricoSection: React.FC = () => {
             Análisis por<span className="text-neon-cyan"> Días</span>
           </h2>
           <p className="font-mono-custom text-white/50 max-w-2xl mx-auto">
-            Evolución del sensor LDR y estado de las luces del parque agrupados por día.
+            Evolución del sensor LDR y estado de la iluminación solar (Día/Noche) agrupados por día.
           </p>
         </div>
 

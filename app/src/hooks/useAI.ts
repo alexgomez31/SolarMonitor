@@ -11,6 +11,8 @@ export interface HealthScore {
   score: number;
   grade: string;
   color: string;
+  autonomy_hrs: number;
+  avg_efficiency: number;
   components: {
     stability: number;
     efficiency: number;

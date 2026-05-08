@@ -7,8 +7,8 @@ import React, { useEffect, useRef } from 'react';
 import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import {
-  Activity, Eye, Lightbulb, Battery, BatteryCharging, BatteryMedium,
-  CloudSun, Moon, Zap,
+  Activity, Eye, Battery, BatteryCharging, BatteryMedium,
+  CloudSun, Moon, Zap, Sun,
 } from 'lucide-react';
 
 import RealTimeChart from '../components/RealTimeChart';
@@ -56,9 +56,12 @@ const DashboardSection: React.FC = () => {
   const { history } = useHistoryData();
   const stats = useSolarStats(data, history);
 
-  const ledOn = data.estadoLDR?.toUpperCase().includes('ENCENDIDO');
-  // Luz ambiental: LDR bajo = hay luz solar (sensor analógico invertido)
-  const hayLuz = data.ldr < 400;
+  // Según el código de Arduino, "ENCENDIDO" significa que el SOL está encendido (Día).
+  // "APAGADO" significa que el sol no está (Noche).
+  const solOn = data.estadoLDR?.toUpperCase().includes('ENCENDIDO');
+  
+  // Luz ambiental: DÍA si el sol está ENCENDIDO, NOCHE si está APAGADO
+  const hayLuz = solOn;
 
   useEffect(() => {
     const ctx = gsap.context(() => {
@@ -124,20 +127,20 @@ const DashboardSection: React.FC = () => {
         {/* ── Tarjetas de estado ── */}
         <div ref={cardsRef} className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-12">
 
-          {/* LED / Fotocelda */}
+          {/* Estado del Sol (LDR) */}
           <div className={`flex items-center gap-4 p-6 rounded-2xl border backdrop-blur-sm
-            ${ledOn ? 'bg-amber-500/10 border-amber-400/40' : 'bg-white/5 border-white/10'}`}>
+            ${solOn ? 'bg-amber-500/10 border-amber-400/40' : 'bg-white/5 border-white/10'}`}>
             <div className="relative flex-shrink-0">
-              <Lightbulb className={`w-10 h-10 ${ledOn ? 'text-amber-400' : 'text-white/30'}`} />
-              {ledOn && <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-amber-400 animate-pulse" />}
+              <Sun className={`w-10 h-10 ${solOn ? 'text-amber-400' : 'text-white/30'}`} />
+              {solOn && <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-amber-400 animate-pulse" />}
             </div>
             <div>
-              <p className="font-mono-custom text-xs uppercase text-white/40 tracking-wider">Luces del Parque</p>
-              <p className={`font-display text-2xl font-bold ${ledOn ? 'text-amber-400' : 'text-white/60'}`}>
-                {ledOn ? 'ENCENDIDAS' : 'APAGADAS'}
+              <p className="font-mono-custom text-xs uppercase text-white/40 tracking-wider">Estado Sol</p>
+              <p className={`font-display text-2xl font-bold ${solOn ? 'text-amber-400' : 'text-white/60'}`}>
+                {solOn ? 'ENCENDIDO' : 'APAGADO'}
               </p>
               <p className="font-mono-custom text-[11px] text-white/30 mt-0.5">
-                estadoLDR: {data.estadoLDR}
+                (Luces físicas: {solOn ? 'Apagadas' : 'Encendidas'})
               </p>
             </div>
           </div>
@@ -194,8 +197,8 @@ const DashboardSection: React.FC = () => {
             <p className="font-display text-2xl text-sky-400">{stats.ldrMax}</p>
           </div>
           <div className="p-5 rounded-2xl border border-white/10 bg-white/5 text-center">
-            <Lightbulb className="w-6 h-6 text-amber-400 mx-auto mb-2" />
-            <p className="font-mono-custom text-xs text-white/40 uppercase mb-1">Encendidos</p>
+            <Sun className="w-6 h-6 text-amber-400 mx-auto mb-2" />
+            <p className="font-mono-custom text-xs text-white/40 uppercase mb-1">Días Sol</p>
             <p className="font-display text-2xl text-amber-400">{stats.totalEncendidos}</p>
           </div>
           <div className="p-5 rounded-2xl border border-white/10 bg-white/5 text-center">
@@ -231,7 +234,7 @@ const DashboardSection: React.FC = () => {
             />
           </div>
           <p className="font-mono-custom text-xs text-white/30 text-center">
-            Valor alto = poca luz · Valor bajo = mucha luz solar · Umbral encendido LED: &lt; 400
+            Valor analógico bruto del fotoresistor
           </p>
         </div>
 

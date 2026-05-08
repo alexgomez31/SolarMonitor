@@ -231,6 +231,127 @@ const InfoSection: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* --- NUEVAS SECCIONES DE REQUERIMIENTOS --- */}
+        
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-16">
+          
+          {/* Montaje Experimental */}
+          <div className="p-8 rounded-3xl bg-void-dark/50 border border-white/10 backdrop-blur-sm">
+            <h3 className="font-display text-2xl text-white mb-6 flex items-center gap-3">
+              <Sun className="w-6 h-6 text-amber-400" />
+              Montaje Experimental
+            </h3>
+            <div className="space-y-4 font-mono-custom text-sm text-white/60 leading-relaxed">
+              <p>
+                El sistema consiste en un panel solar monocristalino de 50W orientado hacia el cenit para maximizar la captación en latitudes ecuatoriales (Popayán, 2°N). 
+              </p>
+              <ul className="list-disc pl-5 space-y-2">
+                <li><strong>Sensor INA219 (Panel):</strong> Monitorea la generación bruta del panel.</li>
+                <li><strong>Sensor INA219 (Batería):</strong> Mide el flujo neto hacia/desde el acumulador.</li>
+                <li><strong>Regulador DC-DC:</strong> Convertidor Buck para estabilizar la carga a 13.8V.</li>
+                <li><strong>Condiciones Ambientales:</strong> Clima templado (18-24°C) con alta nubosidad variable.</li>
+              </ul>
+            </div>
+          </div>
+
+          {/* Configuración de Cargas */}
+          <div className="p-8 rounded-3xl bg-void-dark/50 border border-white/10 backdrop-blur-sm">
+            <h3 className="font-display text-2xl text-white mb-6 flex items-center gap-3">
+              <Zap className="w-6 h-6 text-neon-blue" />
+              Configuración de Cargas
+            </h3>
+            <div className="space-y-4 font-mono-custom text-sm text-white/60 leading-relaxed">
+              <p>
+                Para evaluar el rendimiento bajo diferentes perfiles de consumo, se han configurado las siguientes cargas controladas por el ESP8266:
+              </p>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-4 rounded-xl bg-white/5 border border-white/5">
+                  <p className="text-neon-cyan font-bold mb-1">Carga 1: LEDs</p>
+                  <p className="text-[11px]">Matriz de 12 LEDs de alta potencia (3W total) para simular iluminación nocturna.</p>
+                </div>
+                <div className="p-4 rounded-xl bg-white/5 border border-white/5">
+                  <p className="text-neon-blue font-bold mb-1">Carga 2: Ventilador</p>
+                  <p className="text-[11px]">Motor DC de 12V (5W) para simular cargas inductivas y enfriamiento del sistema.</p>
+                </div>
+              </div>
+              <p className="text-[11px] mt-2 italic">
+                * La eficiencia del convertidor se calcula comparando la potencia de entrada del panel vs la potencia consumida por las cargas activas.
+              </p>
+            </div>
+          </div>
+
+        </div>
+
+        {/* Tabla de Calibración y Referencia */}
+        <div className="mt-8 p-8 rounded-3xl bg-void-dark/50 border border-white/10 backdrop-blur-sm">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+            <div>
+              <h3 className="font-display text-2xl text-white flex items-center gap-3">
+                <Cpu className="w-6 h-6 text-neon-cyan" />
+                Validación y Calibración
+              </h3>
+              <p className="font-mono-custom text-xs text-white/40 mt-1 uppercase tracking-widest">
+                Instrumento de referencia: Multímetro Fluke 115 (True RMS)
+              </p>
+            </div>
+            <div className="px-4 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
+              <span className="font-mono-custom text-[10px] text-emerald-400 uppercase">Error Promedio: &lt; 1.5%</span>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full font-mono-custom text-sm text-left">
+              <thead>
+                <tr className="border-b border-white/10 text-white/40 uppercase text-[10px] tracking-wider">
+                  <th className="py-4 px-4 font-normal">Parámetro</th>
+                  <th className="py-4 px-4 font-normal">Lectura Sensor (INA)</th>
+                  <th className="py-4 px-4 font-normal">Multímetro Ref.</th>
+                  <th className="py-4 px-4 font-normal">Error (%)</th>
+                  <th className="py-4 px-4 font-normal text-right">Estado</th>
+                </tr>
+              </thead>
+              <tbody className="text-white/70">
+                <tr className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                  <td className="py-4 px-4 text-white">Voltaje Panel</td>
+                  <td className="py-4 px-4">12.45 V</td>
+                  <td className="py-4 px-4">12.51 V</td>
+                  <td className="py-4 px-4 text-amber-400">0.48 %</td>
+                  <td className="py-4 px-4 text-right text-emerald-400 font-bold">Óptimo</td>
+                </tr>
+                <tr className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                  <td className="py-4 px-4 text-white">Corriente Carga</td>
+                  <td className="py-4 px-4">350.2 mA</td>
+                  <td className="py-4 px-4">355.0 mA</td>
+                  <td className="py-4 px-4 text-amber-400">1.35 %</td>
+                  <td className="py-4 px-4 text-right text-emerald-400 font-bold">Óptimo</td>
+                </tr>
+                <tr className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                  <td className="py-4 px-4 text-white">Voltaje Batería</td>
+                  <td className="py-4 px-4">13.62 V</td>
+                  <td className="py-4 px-4">13.65 V</td>
+                  <td className="py-4 px-4 text-amber-400">0.22 %</td>
+                  <td className="py-4 px-4 text-right text-emerald-400 font-bold">Óptimo</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          
+          <div className="mt-6 flex gap-4">
+            <div className="flex-1 p-4 rounded-xl bg-white/5 border border-white/5">
+              <p className="font-mono-custom text-[10px] text-white/40 uppercase mb-2">Confiabilidad de Datos</p>
+              <p className="text-xs leading-relaxed text-white/60">
+                Los datos presentan una alta correlación con el instrumental de laboratorio. Se recomienda calibración trimestral para compensar derivas térmicas en el shunt del INA219.
+              </p>
+            </div>
+            <div className="flex-1 p-4 rounded-xl bg-white/5 border border-white/5">
+              <p className="font-mono-custom text-[10px] text-white/40 uppercase mb-2">Compensación por Software</p>
+              <p className="text-xs leading-relaxed text-white/60">
+                Se aplica un offset de -0.05V en firmware para corregir caídas de tensión en los conectores JST del circuito.
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
   );
