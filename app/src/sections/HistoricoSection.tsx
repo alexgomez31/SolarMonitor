@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useDailySummary, useLedAnalysis } from '../hooks/useSolarData';
 import type { DayStats, LedSegment } from '../hooks/useSolarData';
+import { HistoricoChartSystem } from '../components/charts/HistoricoChartSystem';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -232,6 +233,12 @@ const HistoricoSection: React.FC = () => {
 
   const days = Object.keys(summary).sort().reverse();
   const [cmpType, setCmpType] = useState<'max' | 'avg'>('max');
+  const [activeTab, setActiveTab] = useState<'resumen' | 'graficas'>('graficas');
+
+  const handleRefresh = () => {
+    refreshSum();
+    // refreshHist se maneja ahora dentro del componente de gráficas
+  };
 
   useEffect(() => {
     const ctx = gsap.context(() => {
@@ -271,9 +278,27 @@ const HistoricoSection: React.FC = () => {
           </p>
         </div>
 
-        {/* Refresh */}
-        <div className="flex justify-end mb-6">
-          <button onClick={refreshSum}
+        {/* Tabs and Refresh */}
+        <div className="flex flex-wrap gap-4 justify-between mb-6">
+          <div className="flex bg-void-dark/50 border border-white/10 rounded-full p-1 backdrop-blur-sm overflow-x-auto">
+            <button
+              onClick={() => setActiveTab('graficas')}
+              className={`px-4 py-2 rounded-full font-mono-custom text-xs uppercase whitespace-nowrap transition-all ${
+                activeTab === 'graficas' ? 'bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/30' : 'text-white/40 hover:text-white/80'
+              }`}
+            >
+              Gráficas Detalladas
+            </button>
+            <button
+              onClick={() => setActiveTab('resumen')}
+              className={`px-4 py-2 rounded-full font-mono-custom text-xs uppercase whitespace-nowrap transition-all ${
+                activeTab === 'resumen' ? 'bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/30' : 'text-white/40 hover:text-white/80'
+              }`}
+            >
+              Resumen por Días
+            </button>
+          </div>
+          <button onClick={handleRefresh}
             className="flex items-center gap-2 px-4 py-2 rounded-full border border-white/20 text-white/60
               hover:border-neon-cyan/40 hover:text-neon-cyan transition-all font-mono-custom text-xs uppercase">
             <RefreshCw className="w-3 h-3" />
@@ -281,14 +306,17 @@ const HistoricoSection: React.FC = () => {
           </button>
         </div>
 
-        {loadSum ? (
-          <div className="flex justify-center py-20">
-            <div className="w-10 h-10 border-2 border-neon-cyan border-t-transparent rounded-full animate-spin" />
-          </div>
-        ) : days.length === 0 ? (
-          <div className="text-center py-20 text-white/30 font-mono-custom">Sin datos históricos</div>
+        {activeTab === 'graficas' ? (
+          <HistoricoChartSystem />
         ) : (
-          <div className="space-y-6">
+          loadSum ? (
+            <div className="flex justify-center py-20">
+              <div className="w-10 h-10 border-2 border-neon-cyan border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : days.length === 0 ? (
+            <div className="text-center py-20 text-white/30 font-mono-custom">Sin datos históricos</div>
+          ) : (
+            <div className="space-y-6">
             {/* Panel comparativo */}
             <div className="p-6 rounded-2xl bg-void-dark/40 border border-white/10 backdrop-blur-sm">
               <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
@@ -323,6 +351,7 @@ const HistoricoSection: React.FC = () => {
               />
             ))}
           </div>
+          )
         )}
       </div>
     </section>

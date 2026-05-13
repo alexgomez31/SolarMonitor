@@ -105,6 +105,18 @@ export interface RealtimePoint {
   value: number;
 }
 
+export interface WeatherData {
+  temperature_2m: number;
+  relative_humidity_2m: number;
+  apparent_temperature: number;
+  precipitation: number;
+  weather_code: number;
+  cloud_cover: number;
+  wind_speed_10m: number;
+  is_day: number;
+  last_updated: string | null;
+}
+
 // =============================================================================
 // CONFIGURACIÓN
 // =============================================================================
@@ -208,28 +220,49 @@ export function useRealtimeBuffer(data: SolarData) {
 // HOOK - Historial completo de Firebase
 // =============================================================================
 
-export function useHistoryData() {
+export function useAvailableDates() {
+  const [dates, setDates] = useState<string[]>([]);
+  
+  useEffect(() => {
+    const fetchDates = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/available-dates`);
+        if (res.ok) setDates(await res.json());
+      } catch (err) {}
+    };
+    fetchDates();
+  }, []);
+  
+  return dates;
+}
+
+export function useHistoryData(date?: string | null) {
   const [history, setHistory] = useState<HistoryData[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError]     = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchHistory = async () => {
-      try {
-        const res = await fetch(`${API_BASE_URL}/history`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        setHistory(await res.json());
-        setError(null);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Error');
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchHistory();
-  }, []);
+  const fetchHistory = useCallback(async () => {
+    setLoading(true);
+    try {
+      const url = date && date !== 'ALL' ? `${API_BASE_URL}/history?date=${date}` : `${API_BASE_URL}/history`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setHistory(await res.json());
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error');
+    } finally {
+      setLoading(false);
+    }
+  }, [date]);
 
-  return { history, loading, error };
+  useEffect(() => {
+    fetchHistory();
+    // Quitamos el auto-refresh aquí para evitar llamadas masivas a Firebase
+    // Solo se llama 1 sola vez por fecha seleccionada o si le da click en Actualizar.
+  }, [fetchHistory]);
+
+  return { history, loading, error, refresh: fetchHistory };
 }
 
 // =============================================================================
@@ -314,6 +347,32 @@ export function useSolarStats(_data: SolarData, history: HistoryData[]) {
   }
 
   return stats;
+}
+
+// =============================================================================
+// HOOK - Clima actual
+// =============================================================================
+
+export function useWeather() {
+  const [weather, setWeather] = useState<WeatherData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const fetchWeather = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/weather`);
+      if (res.ok) setWeather(await res.json());
+    } catch (err) {} finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchWeather();
+    const iv = setInterval(fetchWeather, 900_000); // 15 min
+    return () => clearInterval(iv);
+  }, [fetchWeather]);
+
+  return { weather, loading, refresh: fetchWeather };
 }
 
 export default useSolarData;

@@ -5,7 +5,7 @@
 # =============================================================================
 
 import os
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
 import requests
 import threading
@@ -37,7 +37,7 @@ app = Flask(
 )
 CORS(app)
 
-FIREBASE_URL = "https://caldas-v2-default-rtdb.firebaseio.com/"
+FIREBASE_URL = "https://caldas-d4fa9-default-rtdb.firebaseio.com"
 
 # Tiempo máximo de silencio del circuito antes de considerar desconexión (segundos)
 CIRCUIT_TIMEOUT_SEC = 60
@@ -82,6 +82,43 @@ data_cache = {
     # Control de polling
     "polling_active":     True,   # Si False, el backend NO consulta Firebase
 }
+
+# Cache para el clima (Popayán, Cauca)
+weather_cache = {
+    "temperature_2m": 0,
+    "relative_humidity_2m": 0,
+    "apparent_temperature": 0,
+    "precipitation": 0,
+    "weather_code": 0,
+    "cloud_cover": 0,
+    "wind_speed_10m": 0,
+    "is_day": 1,
+    "last_updated": None
+}
+
+def fetch_weather_data():
+    """Obtiene el clima actual de Popayán (Centro / Empedrado) vía Open-Meteo"""
+    global weather_cache
+    try:
+        url = "https://api.open-meteo.com/v1/forecast?latitude=2.4382&longitude=-76.6132&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,cloud_cover,wind_speed_10m&timezone=America%2FBogota"
+        resp = requests.get(url, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            current = data.get("current", {})
+            weather_cache.update({
+                "temperature_2m": current.get("temperature_2m", 0),
+                "relative_humidity_2m": current.get("relative_humidity_2m", 0),
+                "apparent_temperature": current.get("apparent_temperature", 0),
+                "precipitation": current.get("precipitation", 0),
+                "weather_code": current.get("weather_code", 0),
+                "cloud_cover": current.get("cloud_cover", 0),
+                "wind_speed_10m": current.get("wind_speed_10m", 0),
+                "is_day": current.get("is_day", 1),
+                "last_updated": datetime.now().isoformat()
+            })
+            print(f"[WEATHER] Clima actualizado: {weather_cache['temperature_2m']}°C")
+    except Exception as exc:
+        print(f"[WEATHER] Error actualizando clima: {exc}")
 
 # =============================================================================
 # PARSEO DE FIREBASE
@@ -234,12 +271,20 @@ def fetch_data_from_firebase():
 
 
 def background_data_fetcher():
+    last_weather_fetch = 0
     while True:
         if _state["polling_active"]:
             fetch_data_from_firebase()
         else:
             # Polling pausado: actualizar solo el flag en el cache sin tocar Firebase
             data_cache["polling_active"] = False
+            
+        # Actualizar clima cada 15 minutos (900 segundos)
+        now_ts = time.time()
+        if now_ts - last_weather_fetch > 900:
+            fetch_weather_data()
+            last_weather_fetch = now_ts
+            
         time.sleep(5)
 
 
@@ -289,9 +334,12 @@ def load_all_history(limit_days=3) -> list:
                     "fecha":       day_key,
                     "hora":        hora,
                     "hour_of_day": ts.hour + ts.minute / 60.0,
-                    "ldr":         r["ldr"],
+                    "ldr":         r.get("ldr", 0),
                     "estadoLDR":   r["estadoLDR"],
                     "estado":      r["estado"],
+                    "voltage":     r["panel"]["voltaje_V"],
+                    "current_mA":  r["panel"]["corriente_mA"],
+                    "power_mW":    r["panel"]["potencia_mW"],
                 })
         return history
     except Exception as exc:
@@ -309,27 +357,40 @@ def load_all_history(limit_days=3) -> list:
 
 def run_anomaly_detection(data: list) -> dict:
     """
-    Detecta anomalías usando Z-Score sobre el LDR.
+    Detecta anomalías multivariantes (LDR y Potencia).
     """
     if len(data) < 10:
         return {"anomalies": [], "total": 0, "pct": 0.0}
 
-    ldrs = np.array([d["ldr"] for d in data])
+    features = np.array([[d["ldr"], d["power_mW"]] for d in data])
+    z_scores = np.abs(stats.zscore(features))
+    max_z = np.max(z_scores, axis=1) # Tomamos el max Z-score de ambas variables
+    
     anomalies = []
     for i, d in enumerate(data):
-        score = abs(stats.zscore(ldrs)[i])
+        score = max_z[i]
         if score > 2.5:
             severity = "critical" if score > 3.5 else "warning"
+            
+            # Qué variable causó la anomalía?
+            if z_scores[i][0] > z_scores[i][1]:
+                desc = f"LDR inusual: {d['ldr']} (z={z_scores[i][0]:.2f})"
+            else:
+                desc = f"Potencia inusual: {d['power_mW']}mW (z={z_scores[i][1]:.2f})"
+
             anomalies.append({
                 "timestamp":  d["ts_iso"],
                 "hora":       d["hora"],
                 "fecha":      d["fecha"],
                 "ldr":        d["ldr"],
+                "voltage":    d.get("voltage", 0),
+                "current_mA": d.get("current_mA", 0),
+                "power_mW":   d.get("power_mW", 0),
                 "estadoLDR":  d["estadoLDR"],
                 "estado":     d["estado"],
-                "z_score":    round(score, 2),
+                "z_score":    round(float(score), 2),
                 "severity":   severity,
-                "description": f"LDR inusual: {d['ldr']} (z={score:.2f})",
+                "description": desc,
             })
 
     pct = round(len(anomalies) / len(data) * 100, 1) if data else 0.0
@@ -343,7 +404,7 @@ def run_clustering(data: list) -> dict:
     if len(data) < 15:
         return {"points": [], "centroids": [], "labels": {}}
 
-    X = np.array([[d["ldr"], 0] for d in data])
+    X = np.array([[d["ldr"], d["power_mW"]] for d in data])
 
     # Normalizar
     scaler = StandardScaler()
@@ -406,25 +467,90 @@ def run_clustering(data: list) -> dict:
 
 
 def run_correlation_analysis(data: list) -> dict:
-    """Análisis simplificado: solo LDR disponible del Arduino."""
+    """Análisis completo de correlación de Pearson."""
     if len(data) < 5:
         return {"matrix": {}, "insights": []}
-    ldrs = np.array([d["ldr"] for d in data])
+
+    vars = ["voltage", "current_mA", "power_mW", "ldr"]
+    matrix = {}
+    insights = []
+    
+    for v1 in vars:
+        matrix[v1] = {}
+        arr1 = np.array([d.get(v1, 0) for d in data])
+        for v2 in vars:
+            arr2 = np.array([d.get(v2, 0) for d in data])
+            if np.std(arr1) == 0 or np.std(arr2) == 0:
+                matrix[v1][v2] = {"r": 0.0, "p": 1.0}
+            else:
+                r, p = stats.pearsonr(arr1, arr2)
+                matrix[v1][v2] = {"r": float(r), "p": float(p)}
+                
+                if v1 != v2 and v1 < v2 and abs(r) > 0.5:
+                    insights.append({
+                        "var1": v1, "var2": v2, "r": float(r),
+                        "description": f"Fuerte correlación ({'positiva' if r > 0 else 'negativa'}) entre {v1} y {v2} (r={r:.2f})."
+                    })
+
+    insights.sort(key=lambda x: abs(x["r"]), reverse=True)
+
     return {
-        "matrix": {"ldr": {"ldr": {"r": 1.0, "p": 0.0}}},
-        "insights": [{"var1": "LDR", "var2": "LDR",
-                      "r": 1.0,
-                      "description": f"LDR promedio: {round(float(ldrs.mean()),1)} — rango [{int(ldrs.min())}, {int(ldrs.max())}]"}],
+        "matrix": matrix,
+        "insights": insights[:5],
     }
 
 
 def run_power_prediction(data: list) -> dict:
-    """Sin datos de potencia del Arduino — retorna estructura vacía compatible."""
+    """Predicción de Potencia mediante Regresión Polinomial en base al LDR."""
+    if len(data) < 10:
+        return {
+            "curve": [], "model_score": 0.0, "model_score_pct": 0.0,
+            "current_ldr": 0, "current_prediction": 0,
+            "current_real": 0, "std_error": 0, "ldr_range": [0, 1024],
+        }
+
+    X = np.array([[d["ldr"]] for d in data])
+    y = np.array([d.get("power_mW", 0) for d in data])
+    
+    pipeline = Pipeline([
+        ('poly', PolynomialFeatures(degree=2)),
+        ('linear', LinearRegression())
+    ])
+    
+    pipeline.fit(X, y)
+    score = pipeline.score(X, y)
+    y_pred = pipeline.predict(X)
+    
+    std_error = np.std(y - y_pred)
+    
+    min_ldr = max(0, int(np.min(X)))
+    max_ldr = min(1024, int(np.max(X)))
+    ldr_range = np.linspace(min_ldr, max_ldr, 20)
+    curve_pred = pipeline.predict(ldr_range.reshape(-1, 1))
+    
+    curve = []
+    for i, ldr_val in enumerate(ldr_range):
+        pred = float(curve_pred[i])
+        curve.append({
+            "ldr": int(ldr_val),
+            "predicted": round(pred, 2),
+            "upper": round(pred + std_error, 2),
+            "lower": max(0, round(pred - std_error, 2))
+        })
+        
     current_ldr = data_cache.get("ldr", 0)
+    current_real = data_cache.get("panel", {}).get("potencia_mW", 0)
+    current_pred = float(pipeline.predict([[current_ldr]])[0])
+
     return {
-        "curve": [], "model_score": 0.0, "model_score_pct": 0.0,
-        "current_ldr": current_ldr, "current_prediction": None,
-        "current_real": 0, "std_error": 0, "ldr_range": [0, 1024],
+        "curve": curve,
+        "model_score": round(float(score), 3),
+        "model_score_pct": max(0, round(float(score) * 100, 1)),
+        "current_ldr": current_ldr,
+        "current_prediction": max(0, round(current_pred, 2)),
+        "current_real": round(float(current_real), 2),
+        "std_error": round(float(std_error), 2),
+        "ldr_range": [min_ldr, max_ldr],
     }
 
 
@@ -438,22 +564,22 @@ def run_trend_analysis(data: list) -> dict:
         return {"trend": "no_active_data", "slope": 0, "trend_line": []}
 
     X = np.arange(len(active)).reshape(-1, 1)
-    y = np.array([d["ldr"] for d in active])
+    y = np.array([d.get("power_mW", 0) for d in active])
     model = LinearRegression()
     model.fit(X, y)
     slope = float(model.coef_[0])
     r2 = float(model.score(X, y))
 
     if slope > 5:
-        trend, trend_label = "increasing", "📈 LDR en aumento"
+        trend, trend_label = "increasing", "📈 Potencia en aumento"
     elif slope < -5:
-        trend, trend_label = "decreasing", "📉 LDR en descenso"
+        trend, trend_label = "decreasing", "📉 Potencia en descenso"
     else:
-        trend, trend_label = "stable", "➡️ LDR estable"
+        trend, trend_label = "stable", "➡️ Potencia estable"
 
     trend_line = [
         {"timestamp": active[i]["ts_iso"], "hora": active[i]["hora"],
-         "ldr": active[i]["ldr"], "trend": round(float(model.predict([[i]])[0]), 1)}
+         "power_mW": active[i].get("power_mW", 0), "trend": round(float(model.predict([[i]])[0]), 1)}
         for i in range(len(active))
     ]
     return {"trend": trend, "trend_label": trend_label,
@@ -471,8 +597,18 @@ def compute_health_score(data: list, anomalies_info: dict, clustering: dict) -> 
     cv_ldr = (np.std(ldrs) / (np.mean(ldrs) + 1e-6)) * 100
     stability_score = max(0, min(100, 100 - cv_ldr * 2))
 
-    # 2. Eficiencia: no aplica sin datos de potencia
-    efficiency_score = 50.0
+    # 2. Eficiencia de generación (power / (ldr_inverse + 1))
+    max_power = max(1, max([d.get("power_mW", 0) for d in data]))
+    efficiencies = []
+    for d in data:
+        sun_intensity = (1024 - d["ldr"]) / 1024.0 # 1.0 = Max sun, 0.0 = Dark
+        expected_power = sun_intensity * max_power
+        if expected_power > 0:
+            eff = min(1.0, d.get("power_mW", 0) / expected_power)
+            efficiencies.append(eff * 100)
+    
+    efficiency_score = np.mean(efficiencies) if efficiencies else 50.0
+    efficiency_score = max(0, min(100, efficiency_score))
 
     # 3. Penalización por anomalías
     anomaly_pct = anomalies_info.get("pct", 0)
@@ -522,23 +658,21 @@ def run_hourly_profile(data: list) -> dict:
     hourly = {}
     for d in data:
         h = d["timestamp"].hour
-        hourly.setdefault(h, []).append(d["ldr"])
+        hourly.setdefault(h, []).append(d.get("power_mW", 0))
 
     profile = []
     for h in sorted(hourly.keys()):
         vals = hourly[h]
-        enc = sum(1 for d in data if d["timestamp"].hour == h and d["estadoLDR"] == "ENCENDIDO")
         profile.append({
             "hour":        h,
             "hour_label":  f"{h:02d}:00",
-            "avg_ldr":     round(np.mean(vals), 1),
-            "max_ldr":     int(np.max(vals)),
-            "min_ldr":     int(np.min(vals)),
-            "encendidos":  enc,
+            "avg_power":   round(np.mean(vals), 1),
+            "max_power":   int(np.max(vals)),
+            "min_power":   int(np.min(vals)),
             "count":       len(vals),
         })
 
-    peak = max(profile, key=lambda x: x["avg_ldr"]) if profile else None
+    peak = max(profile, key=lambda x: x["avg_power"]) if profile else None
 
     return {
         "profile":    profile,
@@ -554,6 +688,11 @@ def run_hourly_profile(data: list) -> dict:
 @app.route("/")
 def index():
     return render_template("index.html")
+
+@app.route("/api/weather")
+def get_weather():
+    """Retorna las condiciones climáticas actuales de Popayán."""
+    return jsonify(weather_cache)
 
 
 @app.route("/api/data")
@@ -606,25 +745,37 @@ def get_status():
     })
 
 
+@app.route("/api/available-dates")
+def get_available_dates():
+    try:
+        resp_shallow = requests.get(f"{FIREBASE_URL}/lecturas.json?shallow=true", timeout=8)
+        if resp_shallow.status_code == 200:
+            dates = sorted(resp_shallow.json().keys(), reverse=True)
+            return jsonify(dates)
+        return jsonify([])
+    except Exception as exc:
+        print(f"[Available Dates] Error: {exc}")
+        return jsonify([])
+
+
 @app.route("/api/history")
 def get_history():
-    """Historial limitado (últimos 200 registros) para reducir transferencia."""
+    """Historial para gráficas (por fecha específica)"""
     try:
-        # Para simplificar, obtenemos la última fecha y sus registros
-        resp_shallow = requests.get(f"{FIREBASE_URL}/lecturas.json?shallow=true", timeout=8)
-        if resp_shallow.status_code != 200:
-            return jsonify([])
-            
-        dates = sorted(resp_shallow.json().keys())
-        if not dates:
-            return jsonify([])
-            
-        latest_date = dates[-1]
-        resp_latest = requests.get(f"{FIREBASE_URL}/lecturas/{latest_date}.json?limitToLast=200", timeout=10)
-        
+        date_param = request.args.get("date")
+        if not date_param:
+            resp_shallow = requests.get(f"{FIREBASE_URL}/lecturas.json?shallow=true", timeout=8)
+            if resp_shallow.status_code != 200:
+                return jsonify([])
+            dates = sorted(resp_shallow.json().keys())
+            if not dates:
+                return jsonify([])
+            date_param = dates[-1]
+
         history = []
-        if resp_latest.status_code == 200:
-            day_data = resp_latest.json()
+        resp_day = requests.get(f"{FIREBASE_URL}/lecturas/{date_param}.json?orderBy=\"$key\"&limitToLast=2000", timeout=10)
+        if resp_day.status_code == 200:
+            day_data = resp_day.json()
             if day_data and isinstance(day_data, dict):
                 for push_id in sorted(day_data.keys()):
                     record = day_data[push_id]
@@ -633,22 +784,20 @@ def get_history():
                     r = parse_reading(record)
                     hora = r["hora"] or "00:00:00"
                     try:
-                        ts = datetime.strptime(f"{latest_date} {hora}", "%Y-%m-%d %H:%M:%S").isoformat()
+                        ts = datetime.strptime(f"{date_param} {hora}", "%Y-%m-%d %H:%M:%S").isoformat()
                     except ValueError:
-                        ts = f"{latest_date}T{hora}"
+                        ts = f"{date_param}T{hora}"
                     history.append({
                         "timestamp":  ts,
                         "ldr":        r["ldr"],
                         "estadoLDR":  r["estadoLDR"],
                         "estado":     r["estado"],
                         "hora":       hora,
-                        "fecha":      latest_date,
+                        "fecha":      date_param,
+                        "panel":      r["panel"],
+                        "bateria":    r["bateria"],
                     })
         return jsonify(history)
-    except Exception as exc:
-        print(f"[History] Error: {exc}")
-        return jsonify([])
-
     except Exception as exc:
         print(f"[History] Error: {exc}")
         return jsonify([])

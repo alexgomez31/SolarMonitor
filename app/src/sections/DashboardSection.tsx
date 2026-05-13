@@ -8,19 +8,32 @@ import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import {
   Activity, Eye, Battery, BatteryCharging, BatteryMedium,
-  CloudSun, Moon, Zap, Sun,
+  CloudSun, Moon, Zap, Sun, Thermometer, Wind, Droplets, Cloud, CloudRain, ThermometerSun
 } from 'lucide-react';
 
 import RealTimeChart from '../components/RealTimeChart';
 import ConnectionStatus from '../components/ConnectionStatus';
 import PollingToggle from '../components/PollingToggle';
 import {
-  useSolarData, useRealtimeBuffer, useHistoryData, useSolarStats,
+  useSolarData, useRealtimeBuffer, useHistoryData, useSolarStats, useWeather
 } from '../hooks/useSolarData';
 
 gsap.registerPlugin(ScrollTrigger);
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+function getWeatherDescription(code: number) {
+  if (code === 0) return 'Despejado';
+  if (code === 1) return 'Mayormente despejado';
+  if (code === 2) return 'Parcialmente nublado';
+  if (code === 3) return 'Nublado';
+  if (code === 45 || code === 48) return 'Niebla';
+  if (code >= 51 && code <= 55) return 'Llovizna';
+  if (code >= 61 && code <= 65) return 'Lluvia';
+  if (code >= 80 && code <= 82) return 'Chubascos';
+  if (code >= 95) return 'Tormenta eléctrica';
+  return 'Desconocido';
+}
 
 function EstadoBateriaIcon({ estado }: { estado: string }) {
   if (estado === 'CARGANDO')     return <BatteryCharging className="w-8 h-8 text-emerald-400" />;
@@ -55,6 +68,7 @@ const DashboardSection: React.FC = () => {
   const { ldrBuffer } = useRealtimeBuffer(data);
   const { history } = useHistoryData();
   const stats = useSolarStats(data, history);
+  const { weather } = useWeather();
 
   // Según el código de Arduino, "ENCENDIDO" significa que el SOL está encendido (Día).
   // "APAGADO" significa que el sol no está (Noche).
@@ -180,6 +194,56 @@ const DashboardSection: React.FC = () => {
                  data.estado === 'DESCARGANDO' ? 'Batería suministrando energía' :
                  'Sin datos del circuito'}
               </p>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Condiciones Climáticas (Popayán) ── */}
+        <div className="mb-12">
+          <h3 className="font-display text-2xl text-white flex items-center gap-3 mb-6">
+            <CloudSun className="w-6 h-6 text-sky-400" />
+            Condiciones Climáticas <span className="text-white/50 text-xl font-mono-custom tracking-wider">| Popayán (Centro)</span>
+          </h3>
+          
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            <div className="p-5 rounded-2xl border border-white/10 bg-white/5 text-center flex flex-col items-center justify-center">
+              <ThermometerSun className="w-8 h-8 text-rose-400 mb-2" />
+              <p className="font-mono-custom text-xs text-white/40 uppercase mb-1">Temperatura</p>
+              <p className="font-display text-3xl text-rose-400">{weather ? `${weather.temperature_2m}°C` : '--'}</p>
+              <p className="font-mono-custom text-[10px] text-white/40 mt-1">Sensación: {weather?.apparent_temperature ?? '--'}°C</p>
+            </div>
+            
+            <div className="p-5 rounded-2xl border border-white/10 bg-white/5 text-center flex flex-col items-center justify-center">
+              <Cloud className="w-8 h-8 text-sky-300 mb-2" />
+              <p className="font-mono-custom text-xs text-white/40 uppercase mb-1">Estado</p>
+              <p className="font-display text-lg text-sky-300 leading-tight flex-1 flex items-center">{weather ? getWeatherDescription(weather.weather_code) : '--'}</p>
+              <p className="font-mono-custom text-[10px] text-white/40 mt-1">Nubes: {weather?.cloud_cover ?? '--'}%</p>
+            </div>
+
+            <div className="p-5 rounded-2xl border border-white/10 bg-white/5 text-center flex flex-col items-center justify-center">
+              <Droplets className="w-8 h-8 text-blue-400 mb-2" />
+              <p className="font-mono-custom text-xs text-white/40 uppercase mb-1">Humedad</p>
+              <p className="font-display text-3xl text-blue-400">{weather ? `${weather.relative_humidity_2m}%` : '--'}</p>
+            </div>
+
+            <div className="p-5 rounded-2xl border border-white/10 bg-white/5 text-center flex flex-col items-center justify-center">
+              <Wind className="w-8 h-8 text-teal-400 mb-2" />
+              <p className="font-mono-custom text-xs text-white/40 uppercase mb-1">Viento</p>
+              <p className="font-display text-3xl text-teal-400">{weather ? `${weather.wind_speed_10m}` : '--'}</p>
+              <p className="font-mono-custom text-[10px] text-white/40 mt-1">km/h</p>
+            </div>
+
+            <div className="p-5 rounded-2xl border border-white/10 bg-white/5 text-center flex flex-col items-center justify-center">
+              <CloudRain className="w-8 h-8 text-indigo-400 mb-2" />
+              <p className="font-mono-custom text-xs text-white/40 uppercase mb-1">Lluvia</p>
+              <p className="font-display text-3xl text-indigo-400">{weather ? `${weather.precipitation}` : '--'}</p>
+              <p className="font-mono-custom text-[10px] text-white/40 mt-1">mm</p>
+            </div>
+            
+            <div className="p-5 rounded-2xl border border-white/10 bg-white/5 text-center flex flex-col items-center justify-center">
+              {weather?.is_day ? <Sun className="w-8 h-8 text-amber-400 mb-2" /> : <Moon className="w-8 h-8 text-indigo-300 mb-2" />}
+              <p className="font-mono-custom text-xs text-white/40 uppercase mb-1">Ciclo Solar</p>
+              <p className={`font-display text-3xl ${weather?.is_day ? 'text-amber-400' : 'text-indigo-300'}`}>{weather ? (weather.is_day ? 'DÍA' : 'NOCHE') : '--'}</p>
             </div>
           </div>
         </div>
