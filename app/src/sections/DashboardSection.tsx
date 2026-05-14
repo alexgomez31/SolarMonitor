@@ -1,13 +1,13 @@
 // =============================================================================
 // SolarMonitor PV - Dashboard Section (Tiempo Real)
-// Datos reales del Arduino: ldr, estadoLDR, estado (batería)
+// Datos reales del Arduino: ldr, estadoFotocelda, estadoLuces, estado
 // =============================================================================
 
 import React, { useEffect, useRef } from 'react';
 import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import {
-  Activity, Eye, Battery, BatteryCharging, BatteryMedium,
+  Activity, Eye, Battery, BatteryCharging, BatteryMedium, Lightbulb, LightbulbOff,
   CloudSun, Moon, Zap, Sun, Thermometer, Wind, Droplets, Cloud, CloudRain, ThermometerSun
 } from 'lucide-react';
 
@@ -70,12 +70,11 @@ const DashboardSection: React.FC = () => {
   const stats = useSolarStats(data, history);
   const { weather } = useWeather();
 
-  // Según el código de Arduino, "ENCENDIDO" significa que el SOL está encendido (Día).
-  // "APAGADO" significa que el sol no está (Noche).
-  const solOn = data.estadoLDR?.toUpperCase().includes('ENCENDIDO');
-  
-  // Luz ambiental: DÍA si el sol está ENCENDIDO, NOCHE si está APAGADO
-  const hayLuz = solOn;
+  // Según el código de Arduino:
+  // estadoFotocelda: "LUZ" (hay luz solar) o "OSCURIDAD" (sin luz)
+  // estadoLuces: "ENCENDIDAS" (LED encendido) o "APAGADAS" (LED apagado)
+  const hayLuz = data.estadoFotocelda?.toUpperCase() === 'LUZ';
+  const lucesOn = data.estadoLuces?.toUpperCase() === 'ENCENDIDAS';
 
   useEffect(() => {
     const ctx = gsap.context(() => {
@@ -139,27 +138,29 @@ const DashboardSection: React.FC = () => {
         </div>
 
         {/* ── Tarjetas de estado ── */}
-        <div ref={cardsRef} className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-12">
+        <div ref={cardsRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-12">
 
-          {/* Estado del Sol (LDR) */}
+          {/* Fotocelda (LUZ / OSCURIDAD) */}
           <div className={`flex items-center gap-4 p-6 rounded-2xl border backdrop-blur-sm
-            ${solOn ? 'bg-amber-500/10 border-amber-400/40' : 'bg-white/5 border-white/10'}`}>
+            ${hayLuz ? 'bg-amber-500/10 border-amber-400/40' : 'bg-indigo-500/10 border-indigo-400/40'}`}>
             <div className="relative flex-shrink-0">
-              <Sun className={`w-10 h-10 ${solOn ? 'text-amber-400' : 'text-white/30'}`} />
-              {solOn && <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-amber-400 animate-pulse" />}
+              {hayLuz
+                ? <Sun className="w-10 h-10 text-amber-400" />
+                : <Moon className="w-10 h-10 text-indigo-400" />}
+              {hayLuz && <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-amber-400 animate-pulse" />}
             </div>
             <div>
-              <p className="font-mono-custom text-xs uppercase text-white/40 tracking-wider">Estado Sol</p>
-              <p className={`font-display text-2xl font-bold ${solOn ? 'text-amber-400' : 'text-white/60'}`}>
-                {solOn ? 'ENCENDIDO' : 'APAGADO'}
+              <p className="font-mono-custom text-xs uppercase text-white/40 tracking-wider">Fotocelda</p>
+              <p className={`font-display text-2xl font-bold ${hayLuz ? 'text-amber-400' : 'text-indigo-400'}`}>
+                {data.estadoFotocelda || 'LUZ'}
               </p>
               <p className="font-mono-custom text-[11px] text-white/30 mt-0.5">
-                (Luces físicas: {solOn ? 'Apagadas' : 'Encendidas'})
+                Sensor de luz ambiental
               </p>
             </div>
           </div>
 
-          {/* Ambiente solar (LDR) */}
+          {/* Ambiente solar (DÍA/NOCHE) */}
           <div className={`flex items-center gap-4 p-6 rounded-2xl border backdrop-blur-sm
             ${hayLuz ? 'bg-sky-500/10 border-sky-400/40' : 'bg-indigo-500/10 border-indigo-400/40'}`}>
             <div className="flex-shrink-0">
@@ -174,6 +175,26 @@ const DashboardSection: React.FC = () => {
               </p>
               <p className="font-mono-custom text-[11px] text-white/30 mt-0.5">
                 LDR: {data.ldr} / 1024
+              </p>
+            </div>
+          </div>
+
+          {/* Estado Luces LED */}
+          <div className={`flex items-center gap-4 p-6 rounded-2xl border backdrop-blur-sm
+            ${lucesOn ? 'bg-yellow-500/10 border-yellow-400/40' : 'bg-white/5 border-white/10'}`}>
+            <div className="relative flex-shrink-0">
+              {lucesOn
+                ? <Lightbulb className="w-10 h-10 text-yellow-400" />
+                : <LightbulbOff className="w-10 h-10 text-white/30" />}
+              {lucesOn && <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-yellow-400 animate-ping" />}
+            </div>
+            <div>
+              <p className="font-mono-custom text-xs uppercase text-white/40 tracking-wider">Luces LED</p>
+              <p className={`font-display text-2xl font-bold ${lucesOn ? 'text-yellow-400' : 'text-white/40'}`}>
+                {data.estadoLuces || 'APAGADAS'}
+              </p>
+              <p className="font-mono-custom text-[11px] text-white/30 mt-0.5">
+                {lucesOn ? 'Iluminación activa (noche)' : 'Sin iluminación (día)'}
               </p>
             </div>
           </div>

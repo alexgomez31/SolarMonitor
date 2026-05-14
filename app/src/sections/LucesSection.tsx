@@ -1,13 +1,13 @@
 // =============================================================================
 // SolarMonitor PV - Sección Luces del Parque
-// Análisis detallado del estado del LED (ENCENDIDO/APAGADO) por día
+// Análisis detallado del estado de las luces LED (ENCENDIDAS/APAGADAS) por día
 // =============================================================================
 
 import React, { useEffect, useRef, useState } from 'react';
 import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import {
-  Moon, CloudSun, Clock, BarChart2, ChevronDown, ChevronUp, RefreshCw, Sun,
+  Moon, CloudSun, Clock, BarChart2, ChevronDown, ChevronUp, RefreshCw, Sun, Lightbulb, LightbulbOff,
 } from 'lucide-react';
 
 import { useLedAnalysis, useSolarData } from '../hooks/useSolarData';
@@ -63,7 +63,7 @@ const DayTimeline: React.FC<{ segmentos: LedSegment[] }> = ({ segmentos }) => {
               style={{
                 left:  `${left}%`,
                 width: `${width}%`,
-                backgroundColor: seg.estado === 'ENCENDIDO'
+                backgroundColor: seg.estado === 'ENCENDIDAS'
                   ? 'rgba(251,191,36,0.85)'
                   : 'rgba(99,102,241,0.2)',
               }}
@@ -74,10 +74,10 @@ const DayTimeline: React.FC<{ segmentos: LedSegment[] }> = ({ segmentos }) => {
       </div>
       <div className="flex items-center gap-4 mt-1">
         <span className="flex items-center gap-1 text-[10px] font-mono-custom text-amber-400/70">
-          <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" /> Encendido
+          <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" /> Encendidas
         </span>
         <span className="flex items-center gap-1 text-[10px] font-mono-custom text-indigo-400/70">
-          <span className="w-2 h-2 rounded-full bg-indigo-400/40 inline-block" /> Apagado
+          <span className="w-2 h-2 rounded-full bg-indigo-400/40 inline-block" /> Apagadas
         </span>
       </div>
     </div>
@@ -115,16 +115,16 @@ const DayCard: React.FC<{
         <div className="flex items-center gap-3">
           <div className={`w-10 h-10 rounded-xl flex items-center justify-center
             ${data.encendidos_count > 0 ? 'bg-amber-400/20' : 'bg-white/5'}`}>
-            <Sun className={`w-5 h-5 ${data.encendidos_count > 0 ? 'text-amber-400' : 'text-white/30'}`} />
+            <Lightbulb className={`w-5 h-5 ${data.encendidos_count > 0 ? 'text-amber-400' : 'text-white/30'}`} />
           </div>
           <div className="text-left">
             <p className="font-display text-white text-base">{formatFecha(fecha)}</p>
             <p className="font-mono-custom text-xs text-white/40">
               {data.encendidos_count === 0
-                ? 'Sin sol registrado'
+                ? 'Sin luces registradas'
                 : data.encendidos_count === 1
-                  ? '1 periodo de sol'
-                  : `${data.encendidos_count} periodos de sol`}
+                  ? '1 periodo con luces'
+                  : `${data.encendidos_count} periodos con luces`}
             </p>
           </div>
         </div>
@@ -133,7 +133,7 @@ const DayCard: React.FC<{
         <div className="flex items-center gap-3">
           {data.total_encendido_min > 0 && (
             <div className="hidden sm:flex items-center gap-1 px-3 py-1 rounded-full bg-amber-400/10 border border-amber-400/20">
-              <Sun className="w-3 h-3 text-amber-400" />
+              <Lightbulb className="w-3 h-3 text-amber-400" />
               <span className="font-mono-custom text-xs text-amber-400">
                 {duracionLabel(data.total_encendido_min)} enc.
               </span>
@@ -189,10 +189,10 @@ const DayCard: React.FC<{
                   <tr key={i} className="border-b border-white/5 hover:bg-white/5 transition-colors">
                     <td className="py-2">
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-mono-custom
-                        ${seg.estado === 'ENCENDIDO'
+                        ${seg.estado === 'ENCENDIDAS'
                           ? 'bg-amber-400/15 text-amber-400'
                           : 'bg-indigo-400/15 text-indigo-400'}`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${seg.estado === 'ENCENDIDO' ? 'bg-amber-400' : 'bg-indigo-400'}`} />
+                        <span className={`w-1.5 h-1.5 rounded-full ${seg.estado === 'ENCENDIDAS' ? 'bg-amber-400' : 'bg-indigo-400'}`} />
                         {seg.estado}
                       </span>
                     </td>
@@ -224,8 +224,8 @@ const LucesSection: React.FC = () => {
   const { data }                 = useSolarData();
   const { analysis, loading, refresh } = useLedAnalysis();
 
-  const solOn  = data.estadoLDR?.toUpperCase().includes('ENCENDIDO');
-  const hayLuz = solOn;
+  const lucesOn  = data.estadoLuces?.toUpperCase() === 'ENCENDIDAS';
+  const hayLuz = data.estadoFotocelda?.toUpperCase() === 'LUZ';
   const days   = Object.keys(analysis).sort().reverse();
 
   // Totales globales
@@ -262,16 +262,16 @@ const LucesSection: React.FC = () => {
         {/* ── Header ── */}
         <div ref={headerRef} className="text-center mb-12">
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-400/10 border border-amber-400/30 mb-6">
-            <Sun className="w-4 h-4 text-amber-400" />
+            <Lightbulb className="w-4 h-4 text-amber-400" />
             <span className="font-mono-custom text-xs uppercase tracking-wider text-amber-400">
-              Estado Sol (LDR)
+              Luces LED (Alumbrado)
             </span>
           </div>
           <h2 className="font-display text-4xl md:text-5xl text-white mb-4">
-            Análisis<span className="text-amber-400"> Solar</span>
+            Análisis de<span className="text-amber-400"> Iluminación</span>
           </h2>
           <p className="font-mono-custom text-white/50 max-w-2xl mx-auto">
-            Historial de periodos de sol. Segmentos por día con duración y frecuencia de incidencia solar.
+            Historial de periodos de iluminación LED. Segmentos por día con duración y frecuencia de las luces encendidas.
           </p>
         </div>
 
@@ -281,14 +281,16 @@ const LucesSection: React.FC = () => {
           {/* Estado ahora */}
           {/* Estado ahora */}
           <div className={`col-span-2 sm:col-span-1 flex flex-col items-center justify-center p-5 rounded-2xl border
-            ${solOn ? 'bg-amber-400/10 border-amber-400/30' : 'bg-indigo-400/10 border-indigo-400/20'}`}>
+            ${lucesOn ? 'bg-amber-400/10 border-amber-400/30' : 'bg-indigo-400/10 border-indigo-400/20'}`}>
             <div className="relative mb-2">
-              <Sun className={`w-10 h-10 ${solOn ? 'text-amber-400' : 'text-indigo-400/50'}`} />
-              {solOn && <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-amber-400 animate-ping" />}
+              {lucesOn
+                ? <Lightbulb className="w-10 h-10 text-amber-400" />
+                : <LightbulbOff className="w-10 h-10 text-indigo-400/50" />}
+              {lucesOn && <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-amber-400 animate-ping" />}
             </div>
-            <p className="font-mono-custom text-xs text-white/40 uppercase">Ahora (Sol)</p>
-            <p className={`font-display text-lg font-bold ${solOn ? 'text-amber-400' : 'text-indigo-400'}`}>
-              {solOn ? 'ENCENDIDO' : 'APAGADO'}
+            <p className="font-mono-custom text-xs text-white/40 uppercase">Luces Ahora</p>
+            <p className={`font-display text-lg font-bold ${lucesOn ? 'text-amber-400' : 'text-indigo-400'}`}>
+              {data.estadoLuces || 'APAGADAS'}
             </p>
           </div>
 
@@ -304,14 +306,14 @@ const LucesSection: React.FC = () => {
           {/* Total encendidos histórico */}
           <div className="flex flex-col items-center justify-center p-5 rounded-2xl border border-white/10 bg-white/5">
             <BarChart2 className="w-8 h-8 text-neon-cyan mb-2" />
-            <p className="font-mono-custom text-xs text-white/40 uppercase">Días Sol (Totales)</p>
+            <p className="font-mono-custom text-xs text-white/40 uppercase">Periodos Luces</p>
             <p className="font-display text-2xl font-bold text-neon-cyan">{totalEncendidos}</p>
           </div>
 
           {/* Tiempo total encendido */}
           <div className="flex flex-col items-center justify-center p-5 rounded-2xl border border-white/10 bg-white/5">
             <Clock className="w-8 h-8 text-amber-400 mb-2" />
-            <p className="font-mono-custom text-xs text-white/40 uppercase">Tiempo sol total</p>
+            <p className="font-mono-custom text-xs text-white/40 uppercase">Tiempo luces total</p>
             <p className="font-display text-2xl font-bold text-amber-400">{duracionLabel(totalEncendidoMin)}</p>
           </div>
         </div>

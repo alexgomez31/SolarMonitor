@@ -1,6 +1,6 @@
 // =============================================================================
 // SolarMonitor PV - Sección Histórico por Días
-// Adaptado a los campos reales del Arduino: ldr, estadoLDR, estado
+// Adaptado a los campos reales del Arduino: ldr, estadoFotocelda, estadoLuces, estado
 // =============================================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -49,7 +49,7 @@ const LdrLineChart: React.FC<{ readings: DayStats['readings']; height?: number }
     .map((r, i) => ({ i, hora: r.hora.slice(0, 5) }))
     .filter((_, i) => i % step === 0 || i === readings.length - 1);
 
-  const encendidos = readings.filter(r => r.estadoLDR === 'ENCENDIDO');
+  const encendidos = readings.filter(r => r.estadoLuces === 'ENCENDIDAS');
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height }} preserveAspectRatio="none">
@@ -208,7 +208,7 @@ const DayCard: React.FC<{
             <p className="font-mono-custom text-xs text-white/40 uppercase mb-2 flex items-center gap-2">
               <Eye className="w-3 h-3 text-amber-400" />
               LDR a lo largo del día
-              <span className="ml-1 text-amber-400">● DÍA/SOL</span>
+              <span className="ml-1 text-amber-400">● LUCES ON</span>
             </p>
             <div className="rounded-xl bg-void-black/40 p-3 border border-white/5">
               <LdrLineChart readings={stats.readings} height={200} />

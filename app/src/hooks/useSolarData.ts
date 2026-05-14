@@ -18,7 +18,8 @@ export interface PowerData {
 export interface SolarData {
   // Datos reales del Arduino
   ldr: number;
-  estadoLDR: string;   // "ENCENDIDO" | "APAGADO"
+  estadoFotocelda: string;  // "LUZ" | "OSCURIDAD"
+  estadoLuces: string;      // "ENCENDIDAS" | "APAGADAS"
   estado: string;      // "CARGANDO" | "EQUILIBRIO" | "DESCARGANDO" | "DESCONOCIDO"
   hora: string | null;
   panel: PowerData;
@@ -52,7 +53,8 @@ export interface SystemStatus {
 export interface HistoryData {
   timestamp: string;
   ldr: number;
-  estadoLDR: string;
+  estadoFotocelda: string;
+  estadoLuces: string;
   estado: string;
   hora: string;
   fecha: string;
@@ -63,8 +65,9 @@ export interface HistoryData {
 export interface DayReading {
   timestamp:  string;
   hora:       string;
-  ldr:        number;
-  estadoLDR:  string;
+  ldr:              number;
+  estadoFotocelda:  string;
+  estadoLuces:      string;
   estado:     string;
   panel:      PowerData;
   bateria:    PowerData;
@@ -83,7 +86,7 @@ export interface DailySummary {
 }
 
 export interface LedSegment {
-  estado: 'ENCENDIDO' | 'APAGADO';
+  estado: 'ENCENDIDAS' | 'APAGADAS';
   hora_inicio: string;
   hora_fin: string;
   duracion_min: number;
@@ -133,7 +136,8 @@ const REALTIME_BUFFER   = 120;    // 4 min de puntos (120 × 5 s)
 export function useSolarData() {
   const [data, setData] = useState<SolarData>({
     ldr: 0,
-    estadoLDR: 'APAGADO',
+    estadoFotocelda: 'LUZ',
+    estadoLuces: 'APAGADAS',
     estado: 'DESCONOCIDO',
     hora: null,
     panel:   { voltaje_V: 0, corriente_mA: 0, potencia_mW: 0 },
@@ -342,7 +346,7 @@ export function useSolarStats(_data: SolarData, history: HistoryData[]) {
     stats.ldrMax = Math.max(...ldrs);
     stats.ldrMin = Math.min(...ldrs);
     stats.ldrAvg = ldrs.reduce((a, b) => a + b, 0) / ldrs.length;
-    stats.totalEncendidos = history.filter(h => h.estadoLDR === 'ENCENDIDO').length;
+    stats.totalEncendidos = history.filter(h => h.estadoLuces === 'ENCENDIDAS').length;
     stats.pctEncendido = Math.round((stats.totalEncendidos / history.length) * 100);
   }
 

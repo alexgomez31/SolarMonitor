@@ -61,8 +61,9 @@ _state = {
 # Cache de valores para el frontend
 data_cache = {
     # Datos del circuito Arduino (campos reales que manda el ESP8266)
-    "ldr":        0,           # valor analógico del fotosensor (0-1024)
-    "estadoLDR":  "APAGADO",  # estado calculado del LED: ENCENDIDO | APAGADO
+    "ldr":        0,              # valor analógico del fotosensor (0-1024)
+    "estadoFotocelda": "LUZ",     # estado fotocelda: LUZ | OSCURIDAD
+    "estadoLuces": "APAGADAS",    # estado LED físico: ENCENDIDAS | APAGADAS
     "estado":     "DESCONOCIDO",  # estado batería/panel: CARGANDO | EQUILIBRIO | DESCARGANDO | DESCONOCIDO
     "hora":       None,
     "panel":      {"voltaje_V": 0, "corriente_mA": 0, "potencia_mW": 0},
@@ -126,15 +127,16 @@ def fetch_weather_data():
 
 def parse_reading(record: dict) -> dict:
     """Parsea un registro tal como lo envía el Arduino:
-       { hora, ldr, estadoLDR, estado }
+       { hora, ldr, estadoFotocelda, estadoLuces, panel, bateria, estado }
     """
     panel = record.get("panel", {})
     bateria = record.get("bateria", {})
     return {
-        "ldr":       int(record.get("ldr",        0)),
-        "estadoLDR": str(record.get("estadoLDR",  "APAGADO")),
-        "estado":    str(record.get("estado",     "DESCONOCIDO")),
-        "hora":      record.get("hora", None),
+        "ldr":              int(record.get("ldr",              0)),
+        "estadoFotocelda":  str(record.get("estadoFotocelda",  "LUZ")),
+        "estadoLuces":      str(record.get("estadoLuces",      "APAGADAS")),
+        "estado":           str(record.get("estado",           "DESCONOCIDO")),
+        "hora":             record.get("hora", None),
         "panel": {
             "voltaje_V": float(panel.get("voltaje_V", 0)),
             "corriente_mA": float(panel.get("corriente_mA", 0)),
@@ -236,16 +238,18 @@ def fetch_data_from_firebase():
             # Actualizar cache
             if circuit_alive:
                 data_cache.update({
-                    "ldr":       latest["ldr"],
-                    "estadoLDR": latest["estadoLDR"],
-                    "estado":    latest["estado"],
-                    "hora":      hora_str,
-                    "panel":     latest["panel"],
-                    "bateria":   latest["bateria"],
+                    "ldr":              latest["ldr"],
+                    "estadoFotocelda":  latest["estadoFotocelda"],
+                    "estadoLuces":      latest["estadoLuces"],
+                    "estado":           latest["estado"],
+                    "hora":             hora_str,
+                    "panel":            latest["panel"],
+                    "bateria":          latest["bateria"],
                 })
             else:
                 data_cache.update({
-                    "ldr": 0, "estadoLDR": "APAGADO",
+                    "ldr": 0, "estadoFotocelda": "LUZ",
+                    "estadoLuces": "APAGADAS",
                     "estado": "DESCONOCIDO", "hora": hora_str,
                     "panel": {"voltaje_V": 0, "corriente_mA": 0, "potencia_mW": 0},
                     "bateria": {"voltaje_V": 0, "corriente_mA": 0, "potencia_mW": 0},
@@ -329,25 +333,22 @@ def load_all_history(limit_days=3) -> list:
                 except ValueError:
                     continue
                 history.append({
-                    "timestamp":   ts,
-                    "ts_iso":      ts.isoformat(),
-                    "fecha":       day_key,
-                    "hora":        hora,
-                    "hour_of_day": ts.hour + ts.minute / 60.0,
-                    "ldr":         r.get("ldr", 0),
-                    "estadoLDR":   r["estadoLDR"],
-                    "estado":      r["estado"],
-                    "voltage":     r["panel"]["voltaje_V"],
-                    "current_mA":  r["panel"]["corriente_mA"],
-                    "power_mW":    r["panel"]["potencia_mW"],
+                    "timestamp":        ts,
+                    "ts_iso":           ts.isoformat(),
+                    "fecha":            day_key,
+                    "hora":             hora,
+                    "hour_of_day":      ts.hour + ts.minute / 60.0,
+                    "ldr":              r.get("ldr", 0),
+                    "estadoFotocelda":  r["estadoFotocelda"],
+                    "estadoLuces":      r["estadoLuces"],
+                    "estado":           r["estado"],
+                    "voltage":          r["panel"]["voltaje_V"],
+                    "current_mA":       r["panel"]["corriente_mA"],
+                    "power_mW":         r["panel"]["potencia_mW"],
                 })
         return history
     except Exception as exc:
         print(f"[IA] Error cargando historial optimizado: {exc}")
-        return []
-
-    except Exception as exc:
-        print(f"[IA] Error cargando historial: {exc}")
         return []
 
 
@@ -386,7 +387,8 @@ def run_anomaly_detection(data: list) -> dict:
                 "voltage":    d.get("voltage", 0),
                 "current_mA": d.get("current_mA", 0),
                 "power_mW":   d.get("power_mW", 0),
-                "estadoLDR":  d["estadoLDR"],
+                "estadoFotocelda": d["estadoFotocelda"],
+                "estadoLuces":  d["estadoLuces"],
                 "estado":     d["estado"],
                 "z_score":    round(float(score), 2),
                 "severity":   severity,
@@ -441,7 +443,8 @@ def run_clustering(data: list) -> dict:
             "timestamp":     d["ts_iso"],
             "hora":          d["hora"],
             "ldr":           d["ldr"],
-            "estadoLDR":     d["estadoLDR"],
+            "estadoFotocelda": d["estadoFotocelda"],
+            "estadoLuces":     d["estadoLuces"],
             "estado":        d["estado"],
             "cluster":       c,
             "cluster_name":  cluster_name_map[c],
@@ -559,7 +562,7 @@ def run_trend_analysis(data: list) -> dict:
     if len(data) < 10:
         return {"trend": "insufficient_data", "slope": 0, "trend_line": []}
 
-    active = [d for d in data if d["estadoLDR"] == "ENCENDIDO"]
+    active = [d for d in data if d["estadoLuces"] == "ENCENDIDAS"]
     if len(active) < 5:
         return {"trend": "no_active_data", "slope": 0, "trend_line": []}
 
@@ -587,7 +590,7 @@ def run_trend_analysis(data: list) -> dict:
 
 
 def compute_health_score(data: list, anomalies_info: dict, clustering: dict) -> dict:
-    """Score de salud 0-100 basado en LDR y estadoLDR del Arduino."""
+    """Score de salud 0-100 basado en LDR y estadoLuces del Arduino."""
     if len(data) < 5:
         return {"score": 0, "grade": "N/A", "components": {}}
 
@@ -615,7 +618,7 @@ def compute_health_score(data: list, anomalies_info: dict, clustering: dict) -> 
     anomaly_score = max(0, 100 - anomaly_pct * 10)
 
     # 4. Actividad del sistema (% de tiempo con LED encendido)
-    encendidos = sum(1 for d in data if d["estadoLDR"] == "ENCENDIDO")
+    encendidos = sum(1 for d in data if d["estadoLuces"] == "ENCENDIDAS")
     activity_score = (encendidos / len(data)) * 100
 
     # Score compuesto (ponderado)
@@ -788,14 +791,15 @@ def get_history():
                     except ValueError:
                         ts = f"{date_param}T{hora}"
                     history.append({
-                        "timestamp":  ts,
-                        "ldr":        r["ldr"],
-                        "estadoLDR":  r["estadoLDR"],
-                        "estado":     r["estado"],
-                        "hora":       hora,
-                        "fecha":      date_param,
-                        "panel":      r["panel"],
-                        "bateria":    r["bateria"],
+                        "timestamp":        ts,
+                        "ldr":              r["ldr"],
+                        "estadoFotocelda":  r["estadoFotocelda"],
+                        "estadoLuces":      r["estadoLuces"],
+                        "estado":           r["estado"],
+                        "hora":             hora,
+                        "fecha":            date_param,
+                        "panel":            r["panel"],
+                        "bateria":          r["bateria"],
                     })
         return jsonify(history)
     except Exception as exc:
@@ -839,14 +843,15 @@ def get_daily_summary():
                     ts = f"{day_key}T{hora}"
 
                 ldrs.append(r["ldr"])
-                if r["estadoLDR"] == "ENCENDIDO":
+                if r["estadoLuces"] == "ENCENDIDAS":
                     encendidos += 1
                 readings_list.append({
-                    "timestamp":  ts,
-                    "hora":       hora,
-                    "ldr":        r["ldr"],
-                    "estadoLDR":  r["estadoLDR"],
-                    "estado":     r["estado"],
+                    "timestamp":        ts,
+                    "hora":             hora,
+                    "ldr":              r["ldr"],
+                    "estadoFotocelda":  r["estadoFotocelda"],
+                    "estadoLuces":      r["estadoLuces"],
+                    "estado":           r["estado"],
                 })
 
             if not ldrs:
@@ -863,10 +868,6 @@ def get_daily_summary():
                 "readings":   readings_list,
             }
         return jsonify(result)
-    except Exception as exc:
-        print(f"[DailySummary] Error: {exc}")
-        return jsonify({})
-
     except Exception as exc:
         print(f"[DailySummary] Error: {exc}")
         return jsonify({})
@@ -899,13 +900,13 @@ def get_led_analysis():
                 if not isinstance(record, dict) or "hora" not in record:
                     continue
                 hora_str   = record.get("hora", "00:00:00")
-                led_val    = str(record.get("estadoLDR", "APAGADO")).upper()
-                led_norm   = "ENCENDIDO" if "ENCENDIDO" in led_val else "APAGADO"
+                luces_val  = str(record.get("estadoLuces", "APAGADAS")).upper()
+                luces_norm = "ENCENDIDAS" if "ENCENDIDAS" in luces_val else "APAGADAS"
                 try:
                     t = datetime.strptime(f"{day_key} {hora_str}", "%Y-%m-%d %H:%M:%S")
                 except ValueError:
                     continue
-                readings.append({"t": t, "led": led_norm})
+                readings.append({"t": t, "led": luces_norm})
 
             if not readings:
                 continue
@@ -938,19 +939,15 @@ def get_led_analysis():
                 "duracion_min": dur,
             })
 
-            encendidos_count = sum(1 for s in segments if s["estado"] == "ENCENDIDO")
+            encendidas_count = sum(1 for s in segments if s["estado"] == "ENCENDIDAS")
             result[day_key] = {
                 "segmentos":             segments,
-                "encendidos_count":      encendidos_count,
-                "total_encendido_min":   round(sum(s["duracion_min"] for s in segments if s["estado"] == "ENCENDIDO"), 1),
-                "total_apagado_min":     round(sum(s["duracion_min"] for s in segments if s["estado"] == "APAGADO"),   1),
+                "encendidos_count":      encendidas_count,
+                "total_encendido_min":   round(sum(s["duracion_min"] for s in segments if s["estado"] == "ENCENDIDAS"), 1),
+                "total_apagado_min":     round(sum(s["duracion_min"] for s in segments if s["estado"] == "APAGADAS"),   1),
             }
 
         return jsonify(result)
-    except Exception as exc:
-        print(f"[LedAnalysis] Error: {exc}")
-        return jsonify({})
-
     except Exception as exc:
         print(f"[LedAnalysis] Error: {exc}")
         return jsonify({})
