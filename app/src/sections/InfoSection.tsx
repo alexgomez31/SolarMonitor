@@ -55,7 +55,7 @@ const InfoSection: React.FC = () => {
     {
       icon: <Sun className="w-8 h-8" />,
       title: 'Energía Solar',
-      description: 'Panel fotovoltaico de 50W que captura la energía del sol y la convierte en electricidad limpia y renovable.',
+      description: 'Panel fotovoltaico captura la energía del sol y la convierte en electricidad limpia y renovable.',
       color: 'amber',
     },
     {
@@ -244,7 +244,7 @@ const InfoSection: React.FC = () => {
             </h3>
             <div className="space-y-4 font-mono-custom text-sm text-white/60 leading-relaxed">
               <p>
-                El sistema consiste en un panel solar monocristalino de 50W orientado hacia el cenit para maximizar la captación en latitudes ecuatoriales (Popayán, 2°N). 
+                El sistema consiste en un panel solar monocristalino de rientado hacia el cenit para maximizar la captación en latitudes ecuatoriales (Popayán, 2°N). 
               </p>
               <ul className="list-disc pl-5 space-y-2">
                 <li><strong>Sensor INA219 (Panel):</strong> Monitorea la generación bruta del panel.</li>

@@ -89,7 +89,7 @@ export const hardwareConfig: HardwareConfig = {
   microcontroller: "ESP8266",
   communication: "WiFi 2.4GHz",
   sensors: ["Sensor de Voltaje", "Sensor de Corriente"],
-  powerSource: "Panel Solar 50W",
+  powerSource: "Panel Solar",
 };
 
 // -- Dashboard Configuration --------------------------------------------------
