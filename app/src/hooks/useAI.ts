@@ -26,6 +26,7 @@ export interface Anomaly {
   timestamp: string;
   hora: string;
   fecha: string;
+  ldr: number;
   voltage: number;
   current_mA: number;
   power_mW: number;
@@ -118,6 +119,29 @@ export interface HourlyProfile {
   total_hours: number;
 }
 
+export interface EnergyBalancePoint {
+  hora: string;
+  timestamp: string;
+  panel_mW: number;
+  bateria_mW: number;
+  balance: number;
+  estado: string;
+}
+
+export interface EnergyBalance {
+  balance_points: EnergyBalancePoint[];
+  summary: {
+    avg_panel_mW: number;
+    max_panel_mW: number;
+    avg_bat_mW: number;
+    total_energy_panel_mWh: number;
+    total_energy_bat_mWh: number;
+  };
+  charging_pct: number;
+  discharging_pct: number;
+  equilibrium_pct: number;
+}
+
 export interface AIAnalysis {
   status: "ok" | "insufficient_data" | "error";
   data_points: number;
@@ -129,6 +153,7 @@ export interface AIAnalysis {
   power_prediction: PowerPrediction;
   trend_analysis: TrendAnalysis;
   hourly_profile: HourlyProfile;
+  energy_balance: EnergyBalance;
   message?: string;
 }
 

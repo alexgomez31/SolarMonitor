@@ -8,7 +8,7 @@ import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   ResponsiveContainer, XAxis, YAxis, CartesianGrid,
   Tooltip, ScatterChart, Scatter, BarChart, Bar, Cell,
-  ComposedChart, Line, ReferenceLine, Area,
+  ComposedChart, Line, ReferenceLine, Area, PieChart, Pie,
 } from "recharts";
 import { useState, useEffect, useRef } from "react";
 
@@ -181,7 +181,7 @@ function AISkeleton() {
 export default function AISection() {
   const { analysis, loading, error, lastUpdated, refresh } = useAI(60_000);
   const [activeTab, setActiveTab] = useState<
-    "health" | "prediction" | "clusters" | "anomalies" | "correlation" | "hourly"
+    "health" | "prediction" | "clusters" | "anomalies" | "correlation" | "hourly" | "energy"
   >("health");
 
   const tabs = [
@@ -191,6 +191,7 @@ export default function AISection() {
     { id: "anomalies",   label: "⚠️ Anomalías",   title: "Detección de Anomalías" },
     { id: "correlation", label: "🔗 Correlaciones",title: "Matriz de Correlación" },
     { id: "hourly",      label: "🕐 Perfil",       title: "Perfil Horario" },
+    { id: "energy",      label: "🔋 Energía",      title: "Balance Energético" },
   ] as const;
 
   return (
@@ -637,6 +638,121 @@ export default function AISection() {
                     </tbody>
                   </table>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Tab: BALANCE ENERGÉTICO ── */}
+          {activeTab === "energy" && analysis.energy_balance && (
+            <div className="ai-panel">
+              {/* Estado de carga summary */}
+              <div className="ai-prediction-hero">
+                <div className="ai-pred-stat">
+                  <span className="ai-pred-stat__label">Cargando</span>
+                  <span className="ai-pred-stat__value" style={{ color: "#10B981" }}>
+                    {analysis.energy_balance.charging_pct}%
+                  </span>
+                </div>
+                <div className="ai-pred-stat">
+                  <span className="ai-pred-stat__label">Equilibrio</span>
+                  <span className="ai-pred-stat__value" style={{ color: "#00D4FF" }}>
+                    {analysis.energy_balance.equilibrium_pct}%
+                  </span>
+                </div>
+                <div className="ai-pred-stat">
+                  <span className="ai-pred-stat__label">Descargando</span>
+                  <span className="ai-pred-stat__value" style={{ color: "#EF4444" }}>
+                    {analysis.energy_balance.discharging_pct}%
+                  </span>
+                </div>
+              </div>
+
+              {/* Resumen energético */}
+              {analysis.energy_balance.summary && (
+                <div className="ai-kpis">
+                  <div className="ai-kpi" style={{ "--accent": "#F59E0B" } as any}>
+                    <span className="ai-kpi__icon">☀️</span>
+                    <span className="ai-kpi__value" style={{ color: "#F59E0B" }}>
+                      {analysis.energy_balance.summary.avg_panel_mW}
+                    </span>
+                    <span className="ai-kpi__label">Panel Prom. (mW)</span>
+                  </div>
+                  <div className="ai-kpi" style={{ "--accent": "#A78BFA" } as any}>
+                    <span className="ai-kpi__icon">🔋</span>
+                    <span className="ai-kpi__value" style={{ color: "#A78BFA" }}>
+                      {analysis.energy_balance.summary.avg_bat_mW}
+                    </span>
+                    <span className="ai-kpi__label">Batería Prom. (mW)</span>
+                  </div>
+                  <div className="ai-kpi" style={{ "--accent": "#10B981" } as any}>
+                    <span className="ai-kpi__icon">⚡</span>
+                    <span className="ai-kpi__value" style={{ color: "#10B981" }}>
+                      {analysis.energy_balance.summary.total_energy_panel_mWh}
+                    </span>
+                    <span className="ai-kpi__label">Energía Panel (mWh)</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Gráfica Panel vs Batería */}
+              {analysis.energy_balance.balance_points.length > 0 && (
+                <div className="ai-card">
+                  <h3 className="ai-card__title">Balance Energético — Panel vs Batería</h3>
+                  <p className="ai-card__sub">Potencia del panel solar comparada con consumo/carga de la batería</p>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <ComposedChart data={analysis.energy_balance.balance_points} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="balGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#10B981" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="#10B981" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid stroke="rgba(255,255,255,0.05)" />
+                      <XAxis dataKey="hora" stroke="rgba(255,255,255,0.3)" tick={{ fill: "rgba(255,255,255,0.4)", fontSize: 10 }} />
+                      <YAxis stroke="rgba(255,255,255,0.3)" tick={{ fill: "rgba(255,255,255,0.5)", fontSize: 11 }} label={{ value: "mW", angle: -90, position: "insideLeft", fill: "rgba(255,255,255,0.5)" }} />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Area type="monotone" dataKey="balance" stroke="#10B981" fill="url(#balGrad)" strokeWidth={1} name="Balance neto (mW)" />
+                      <Line type="monotone" dataKey="panel_mW" stroke="#F59E0B" strokeWidth={2} dot={false} name="Panel (mW)" />
+                      <Line type="monotone" dataKey="bateria_mW" stroke="#A78BFA" strokeWidth={2} dot={false} name="Batería (mW)" />
+                      <ReferenceLine y={0} stroke="rgba(255,255,255,0.2)" strokeDasharray="4 4" />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {/* Distribución de estados como donut */}
+              <div className="ai-card">
+                <h3 className="ai-card__title">Distribución de Estados Energéticos</h3>
+                <p className="ai-card__sub">Porcentaje del tiempo en cada modo operativo</p>
+                <ResponsiveContainer width="100%" height={250}>
+                  <PieChart>
+                    <Pie
+                      data={[
+                        { name: "Cargando", value: analysis.energy_balance.charging_pct, fill: "#10B981" },
+                        { name: "Equilibrio", value: analysis.energy_balance.equilibrium_pct, fill: "#00D4FF" },
+                        { name: "Descargando", value: analysis.energy_balance.discharging_pct, fill: "#EF4444" },
+                      ].filter(d => d.value > 0)}
+                      cx="50%" cy="50%"
+                      innerRadius={60} outerRadius={90}
+                      paddingAngle={3}
+                      dataKey="value"
+                      label={({ name, value }) => `${name}: ${value}%`}
+                    >
+                      {[
+                        { fill: "#10B981" },
+                        { fill: "#00D4FF" },
+                        { fill: "#EF4444" },
+                      ].filter((_, i) => [
+                        analysis.energy_balance.charging_pct,
+                        analysis.energy_balance.equilibrium_pct,
+                        analysis.energy_balance.discharging_pct,
+                      ][i] > 0).map((entry, idx) => (
+                        <Cell key={idx} fill={entry.fill} />
+                      ))}
+                    </Pie>
+                    <Tooltip content={<CustomTooltip />} />
+                  </PieChart>
+                </ResponsiveContainer>
               </div>
             </div>
           )}

@@ -345,6 +345,9 @@ def load_all_history(limit_days=3) -> list:
                     "voltage":          r["panel"]["voltaje_V"],
                     "current_mA":       r["panel"]["corriente_mA"],
                     "power_mW":         r["panel"]["potencia_mW"],
+                    "bat_voltage":      r["bateria"]["voltaje_V"],
+                    "bat_current_mA":   r["bateria"]["corriente_mA"],
+                    "bat_power_mW":     r["bateria"]["potencia_mW"],
                 })
         return history
     except Exception as exc:
@@ -443,6 +446,7 @@ def run_clustering(data: list) -> dict:
             "timestamp":     d["ts_iso"],
             "hora":          d["hora"],
             "ldr":           d["ldr"],
+            "power_mW":      d.get("power_mW", 0),
             "estadoFotocelda": d["estadoFotocelda"],
             "estadoLuces":     d["estadoLuces"],
             "estado":        d["estado"],
@@ -558,13 +562,15 @@ def run_power_prediction(data: list) -> dict:
 
 
 def run_trend_analysis(data: list) -> dict:
-    """Tendencia basada en LDR (único sensor analógico disponible)."""
+    """Tendencia temporal de potencia del panel solar."""
     if len(data) < 10:
-        return {"trend": "insufficient_data", "slope": 0, "trend_line": []}
+        return {"trend": "insufficient_data", "slope": 0, "trend_line": [], "trend_label": "📊 Datos insuficientes", "r2": 0}
 
-    active = [d for d in data if d["estadoLuces"] == "ENCENDIDAS"]
+    # Usar datos con potencia > 0 (cuando hay generación solar)
+    active = [d for d in data if d.get("power_mW", 0) > 0]
     if len(active) < 5:
-        return {"trend": "no_active_data", "slope": 0, "trend_line": []}
+        # Fallback: usar todos los datos
+        active = data[-50:]
 
     X = np.arange(len(active)).reshape(-1, 1)
     y = np.array([d.get("power_mW", 0) for d in active])
@@ -590,26 +596,37 @@ def run_trend_analysis(data: list) -> dict:
 
 
 def compute_health_score(data: list, anomalies_info: dict, clustering: dict) -> dict:
-    """Score de salud 0-100 basado en LDR y estadoLuces del Arduino."""
+    """Score de salud 0-100 del sistema fotovoltaico completo."""
     if len(data) < 5:
-        return {"score": 0, "grade": "N/A", "components": {}}
+        return {
+            "score": 0, "grade": "N/A", "color": "#6B7280",
+            "autonomy_hrs": 0, "avg_efficiency": 0,
+            "components": {"stability": 0, "efficiency": 0, "anomalies": 0, "activity": 0},
+            "data_points": len(data),
+        }
 
     ldrs = [d["ldr"] for d in data]
+    powers = [d.get("power_mW", 0) for d in data]
+    bat_powers = [d.get("bat_power_mW", 0) for d in data]
 
-    # 1. Estabilidad del LDR
-    cv_ldr = (np.std(ldrs) / (np.mean(ldrs) + 1e-6)) * 100
-    stability_score = max(0, min(100, 100 - cv_ldr * 2))
+    # 1. Estabilidad del voltaje del panel
+    voltages = [d.get("voltage", 0) for d in data if d.get("voltage", 0) > 0]
+    if voltages:
+        cv_volt = (np.std(voltages) / (np.mean(voltages) + 1e-6)) * 100
+        stability_score = max(0, min(100, 100 - cv_volt * 5))
+    else:
+        cv_ldr = (np.std(ldrs) / (np.mean(ldrs) + 1e-6)) * 100
+        stability_score = max(0, min(100, 100 - cv_ldr * 2))
 
-    # 2. Eficiencia de generación (power / (ldr_inverse + 1))
-    max_power = max(1, max([d.get("power_mW", 0) for d in data]))
+    # 2. Eficiencia de generación (potencia real vs potencia esperada por nivel de luz)
+    max_power = max(1, max(powers))
     efficiencies = []
     for d in data:
-        sun_intensity = (1024 - d["ldr"]) / 1024.0 # 1.0 = Max sun, 0.0 = Dark
+        sun_intensity = (1024 - d["ldr"]) / 1024.0
         expected_power = sun_intensity * max_power
-        if expected_power > 0:
+        if expected_power > 10:  # solo cuando hay luz suficiente
             eff = min(1.0, d.get("power_mW", 0) / expected_power)
             efficiencies.append(eff * 100)
-    
     efficiency_score = np.mean(efficiencies) if efficiencies else 50.0
     efficiency_score = max(0, min(100, efficiency_score))
 
@@ -617,18 +634,27 @@ def compute_health_score(data: list, anomalies_info: dict, clustering: dict) -> 
     anomaly_pct = anomalies_info.get("pct", 0)
     anomaly_score = max(0, 100 - anomaly_pct * 10)
 
-    # 4. Actividad del sistema (% de tiempo con LED encendido)
-    encendidos = sum(1 for d in data if d["estadoLuces"] == "ENCENDIDAS")
-    activity_score = (encendidos / len(data)) * 100
+    # 4. Actividad del sistema (% de tiempo generando energía)
+    generating = sum(1 for p in powers if p > 0)
+    activity_score = (generating / len(data)) * 100 if data else 0
 
-    # Score compuesto (ponderado)
+    # Score compuesto
     final_score = (
-        stability_score  * 0.30 +
+        stability_score  * 0.25 +
         efficiency_score * 0.35 +
         anomaly_score    * 0.20 +
-        activity_score   * 0.15
+        activity_score   * 0.20
     )
     final_score = round(min(100, max(0, final_score)), 1)
+
+    # Autonomía estimada: si la batería tiene datos de potencia, calcular horas
+    avg_bat_power = np.mean([abs(p) for p in bat_powers if p != 0]) if any(p != 0 for p in bat_powers) else 0
+    # Batería LiPo típica 3.7V * 2000mAh = 7400mWh
+    bat_capacity_mWh = 7400
+    autonomy_hrs = round(bat_capacity_mWh / max(avg_bat_power, 1), 1) if avg_bat_power > 0 else 0
+    autonomy_hrs = min(autonomy_hrs, 99)  # Cap para no mostrar valores absurdos
+
+    avg_efficiency = round(float(efficiency_score), 1)
 
     if final_score >= 80:
         grade, color = "A — Excelente", "#10B981"
@@ -643,6 +669,8 @@ def compute_health_score(data: list, anomalies_info: dict, clustering: dict) -> 
         "score": final_score,
         "grade": grade,
         "color": color,
+        "autonomy_hrs": autonomy_hrs,
+        "avg_efficiency": avg_efficiency,
         "components": {
             "stability":  round(stability_score,  1),
             "efficiency": round(efficiency_score, 1),
@@ -654,9 +682,9 @@ def compute_health_score(data: list, anomalies_info: dict, clustering: dict) -> 
 
 
 def run_hourly_profile(data: list) -> dict:
-    """Perfil promedio hora a hora del LDR."""
+    """Perfil promedio hora a hora de la potencia del panel."""
     if len(data) < 5:
-        return {"profile": []}
+        return {"profile": [], "peak_hour": None, "total_hours": 0}
 
     hourly = {}
     for d in data:
@@ -681,6 +709,52 @@ def run_hourly_profile(data: list) -> dict:
         "profile":    profile,
         "peak_hour":  peak,
         "total_hours": len(profile),
+    }
+
+
+def run_energy_balance(data: list) -> dict:
+    """Análisis del balance energético: Panel vs Batería."""
+    if len(data) < 5:
+        return {
+            "balance_points": [], "summary": {},
+            "charging_pct": 0, "discharging_pct": 0, "equilibrium_pct": 0,
+        }
+
+    balance_points = []
+    estados = {"CARGANDO": 0, "DESCARGANDO": 0, "EQUILIBRIO": 0, "DESCONOCIDO": 0}
+
+    for d in data:
+        panel_p = d.get("power_mW", 0)
+        bat_p = d.get("bat_power_mW", 0)
+        net = panel_p - abs(bat_p)
+        estado = d.get("estado", "DESCONOCIDO")
+        estados[estado] = estados.get(estado, 0) + 1
+
+        balance_points.append({
+            "hora":       d["hora"],
+            "timestamp":  d["ts_iso"],
+            "panel_mW":   round(panel_p, 1),
+            "bateria_mW": round(bat_p, 1),
+            "balance":    round(net, 1),
+            "estado":     estado,
+        })
+
+    total = len(data)
+    panel_powers = [d.get("power_mW", 0) for d in data]
+    bat_powers = [d.get("bat_power_mW", 0) for d in data]
+
+    return {
+        "balance_points": balance_points[-150:],
+        "summary": {
+            "avg_panel_mW": round(np.mean(panel_powers), 1),
+            "max_panel_mW": round(max(panel_powers), 1),
+            "avg_bat_mW":   round(np.mean(bat_powers), 1),
+            "total_energy_panel_mWh": round(sum(panel_powers) * 5 / 3600, 2),  # 5s intervalo
+            "total_energy_bat_mWh":   round(sum(bat_powers) * 5 / 3600, 2),
+        },
+        "charging_pct":    round(estados.get("CARGANDO", 0) / total * 100, 1),
+        "discharging_pct": round(estados.get("DESCARGANDO", 0) / total * 100, 1),
+        "equilibrium_pct": round(estados.get("EQUILIBRIO", 0) / total * 100, 1),
     }
 
 
@@ -981,6 +1055,7 @@ def get_ai_analysis():
         trend       = run_trend_analysis(data)
         health      = compute_health_score(data, anomalies, clustering)
         hourly      = run_hourly_profile(data)
+        energy      = run_energy_balance(data)
 
         return jsonify({
             "status":      "ok",
@@ -993,6 +1068,7 @@ def get_ai_analysis():
             "power_prediction":  prediction,
             "trend_analysis":    trend,
             "hourly_profile":    hourly,
+            "energy_balance":    energy,
         })
 
     except Exception as exc:
