@@ -18,12 +18,12 @@ const API_BASE =
     : "http://localhost:5000/api";
 
 const SUGGESTIONS = [
-  "¿Cuál es el estado actual del sistema?",
-  "¿Cuánta autonomía tiene la batería?",
-  "¿Se han detectado anomalías?",
-  "¿Cuál es la potencia del panel?",
-  "¿Cómo está el clima?",
-  "¿Cuál es la eficiencia del sistema?",
+  "Análisis del 14 de mayo",
+  "¿Cómo está el sistema ahora?",
+  "¿Cuál es la autonomía de la batería?",
+  "¿Quiénes son los desarrolladores?",
+  "¿Cuál es el voltaje máximo registrado?",
+  "¿Cómo está el clima en Popayán?",
 ];
 
 function formatMarkdown(text: string): string {
@@ -39,7 +39,7 @@ export default function ChatWidget() {
     {
       id: 0,
       role: "ai",
-      text: "¡Hola! 👋 Soy **SolarAI**, tu asistente inteligente del sistema fotovoltaico.\n\nPuedes preguntarme sobre voltaje, potencia, batería, eficiencia, predicciones, anomalías, autonomía y más.\n\n💡 Escribe **\"ayuda\"** para ver todo lo que puedo hacer.",
+      text: "¡Hola! 👋 Soy **SolarAI**, el asistente de auditoría de este sistema fotovoltaico.\n\nEstoy conectado en tiempo real a Firebase y puedo realizar análisis profundos de cualquier fecha, calcular tu autonomía o decirte quiénes crearon este proyecto.\n\n💡 **¿Por dónde quieres empezar?**",
       timestamp: new Date(),
     },
   ]);
