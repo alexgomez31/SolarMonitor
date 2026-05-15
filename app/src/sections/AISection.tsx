@@ -181,7 +181,7 @@ function AISkeleton() {
 export default function AISection() {
   const { analysis, loading, error, lastUpdated, refresh } = useAI(60_000);
   const [activeTab, setActiveTab] = useState<
-    "health" | "prediction" | "clusters" | "anomalies" | "correlation" | "hourly" | "energy"
+    "health" | "prediction" | "clusters" | "anomalies" | "correlation" | "hourly" | "energy" | "autonomy"
   >("health");
 
   const tabs = [
@@ -192,6 +192,7 @@ export default function AISection() {
     { id: "correlation", label: "🔗 Correlaciones",title: "Matriz de Correlación" },
     { id: "hourly",      label: "🕐 Perfil",       title: "Perfil Horario" },
     { id: "energy",      label: "🔋 Energía",      title: "Balance Energético" },
+    { id: "autonomy",    label: "⏱️ Autonomía",   title: "Análisis de Autonomía" },
   ] as const;
 
   return (
@@ -754,6 +755,139 @@ export default function AISection() {
                   </PieChart>
                 </ResponsiveContainer>
               </div>
+            </div>
+          )}
+
+          {/* ── Tab: AUTONOMÍA ── */}
+          {activeTab === "autonomy" && analysis.autonomy && (
+            <div className="ai-panel">
+              {/* Especificaciones de la batería */}
+              <div className="ai-prediction-hero">
+                <div className="ai-pred-stat">
+                  <span className="ai-pred-stat__label">Modelo</span>
+                  <span className="ai-pred-stat__value" style={{ color: "#A78BFA", fontSize: "1.2rem" }}>
+                    {analysis.autonomy.battery_spec.model}
+                  </span>
+                </div>
+                <div className="ai-pred-stat">
+                  <span className="ai-pred-stat__label">Voltaje</span>
+                  <span className="ai-pred-stat__value" style={{ color: "#00D4FF" }}>
+                    {analysis.autonomy.battery_spec.voltage_V}V
+                  </span>
+                </div>
+                <div className="ai-pred-stat">
+                  <span className="ai-pred-stat__label">Capacidad</span>
+                  <span className="ai-pred-stat__value" style={{ color: "#10B981" }}>
+                    {analysis.autonomy.battery_spec.capacity_mAh}mAh
+                  </span>
+                </div>
+                <div className="ai-pred-stat">
+                  <span className="ai-pred-stat__label">Energía</span>
+                  <span className="ai-pred-stat__value" style={{ color: "#F59E0B" }}>
+                    {analysis.autonomy.battery_spec.capacity_mWh}mWh
+                  </span>
+                </div>
+              </div>
+
+              {/* Perfiles de autonomía */}
+              <div className="ai-card">
+                <h3 className="ai-card__title">Autonomía por Perfil de Consumo</h3>
+                <p className="ai-card__sub">Tiempo estimado de operación continua según cada escenario de carga</p>
+                <div style={{ display: "flex", flexDirection: "column", gap: "1rem", marginTop: "1rem" }}>
+                  {analysis.autonomy.profiles.map(p => {
+                    const maxHrs = Math.max(...analysis.autonomy.profiles.filter(x => x.autonomy_hrs < 99999).map(x => x.autonomy_hrs), 1);
+                    const pct = Math.min((p.autonomy_hrs / maxHrs) * 100, 100);
+                    return (
+                      <div key={p.id} style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <div>
+                            <span style={{ color: p.color, fontWeight: 700, fontSize: "0.9rem" }}>{p.name}</span>
+                            <span style={{ color: "rgba(255,255,255,0.4)", fontSize: "0.75rem", marginLeft: "0.75rem" }}>
+                              {p.consumption_mA}mA · {p.consumption_mW}mW
+                            </span>
+                          </div>
+                          <span style={{ color: "white", fontWeight: 800, fontSize: "1.1rem" }}>{p.autonomy_label}</span>
+                        </div>
+                        <div style={{ height: "8px", background: "rgba(255,255,255,0.06)", borderRadius: "4px", overflow: "hidden" }}>
+                          <div style={{
+                            height: "100%", borderRadius: "4px",
+                            background: `linear-gradient(90deg, ${p.color}, ${p.color}88)`,
+                            width: p.autonomy_hrs >= 99999 ? "100%" : `${pct}%`,
+                            transition: "width 1s ease",
+                          }} />
+                        </div>
+                        <p style={{ color: "rgba(255,255,255,0.35)", fontSize: "0.72rem" }}>{p.description}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Estadísticas de consumo medido y tiempo de carga */}
+              <div className="ai-panel__grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+                <div className="ai-card">
+                  <h3 className="ai-card__title">Consumo Real Medido</h3>
+                  <p className="ai-card__sub">Estadísticas del sensor INA219 de batería</p>
+                  <div className="ai-component-list">
+                    {[
+                      { label: "Promedio", value: `${analysis.autonomy.measured_stats.avg_mA} mA`, pct: (analysis.autonomy.measured_stats.avg_mA / Math.max(analysis.autonomy.measured_stats.max_mA, 1)) * 100, color: "#00D4FF" },
+                      { label: "Máximo", value: `${analysis.autonomy.measured_stats.max_mA} mA`, pct: 100, color: "#EF4444" },
+                      { label: "Mínimo", value: `${analysis.autonomy.measured_stats.min_mA} mA`, pct: (analysis.autonomy.measured_stats.min_mA / Math.max(analysis.autonomy.measured_stats.max_mA, 1)) * 100, color: "#10B981" },
+                      { label: "Desv. Est.", value: `±${analysis.autonomy.measured_stats.std_mA} mA`, pct: (analysis.autonomy.measured_stats.std_mA / Math.max(analysis.autonomy.measured_stats.max_mA, 1)) * 100, color: "#A78BFA" },
+                    ].map(item => (
+                      <div key={item.label} className="ai-comp-row">
+                        <span style={{ width: "80px" }}>{item.label}</span>
+                        <div className="ai-comp-bar">
+                          <div className="ai-comp-bar__fill" style={{ width: `${item.pct}%`, background: item.color }} />
+                        </div>
+                        <span style={{ color: item.color, fontWeight: 700, width: "80px", textAlign: "right" }}>{item.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p style={{ color: "rgba(255,255,255,0.35)", fontSize: "0.72rem", marginTop: "0.75rem" }}>
+                    Basado en {analysis.autonomy.measured_stats.samples} lecturas de descarga
+                  </p>
+                </div>
+
+                <div className="ai-card">
+                  <h3 className="ai-card__title">Tiempo de Carga Completa</h3>
+                  <p className="ai-card__sub">Estimación para carga 0% → 100%</p>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem", marginTop: "1.5rem" }}>
+                    <span style={{ fontSize: "2.5rem", fontWeight: 800, color: "#10B981" }}>
+                      {analysis.autonomy.charge_estimate.full_charge_label}
+                    </span>
+                    <span style={{ color: "rgba(255,255,255,0.5)", fontSize: "0.85rem" }}>
+                      Corriente de carga promedio: {analysis.autonomy.charge_estimate.avg_charge_current_mA} mA
+                    </span>
+                    <div style={{ width: "100%", marginTop: "1rem", padding: "1rem", background: "rgba(16,185,129,0.06)", borderRadius: "0.75rem", border: "1px solid rgba(16,185,129,0.15)" }}>
+                      <p style={{ color: "rgba(255,255,255,0.6)", fontSize: "0.78rem", textAlign: "center" }}>
+                        🔋 Batería {analysis.autonomy.battery_spec.model} · {analysis.autonomy.battery_spec.capacity_mAh}mAh @ {analysis.autonomy.battery_spec.voltage_V}V
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Consumo por hora */}
+              {analysis.autonomy.hourly_consumption.length > 0 && (
+                <div className="ai-card">
+                  <h3 className="ai-card__title">Patrón de Consumo por Hora</h3>
+                  <p className="ai-card__sub">Corriente promedio de batería a lo largo del día</p>
+                  <ResponsiveContainer width="100%" height={250}>
+                    <BarChart data={analysis.autonomy.hourly_consumption} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                      <CartesianGrid stroke="rgba(255,255,255,0.05)" />
+                      <XAxis dataKey="hour_label" stroke="rgba(255,255,255,0.3)" tick={{ fill: "rgba(255,255,255,0.4)", fontSize: 10 }} />
+                      <YAxis stroke="rgba(255,255,255,0.3)" tick={{ fill: "rgba(255,255,255,0.5)", fontSize: 11 }} label={{ value: "mA", angle: -90, position: "insideLeft", fill: "rgba(255,255,255,0.5)" }} />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Bar dataKey="avg_consumption_mA" name="Consumo Promedio (mA)" radius={[4, 4, 0, 0]}>
+                        {analysis.autonomy.hourly_consumption.map((_, idx) => (
+                          <Cell key={idx} fill={`hsl(${180 + idx * 8}, 70%, 55%)`} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
             </div>
           )}
 

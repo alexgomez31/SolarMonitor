@@ -142,6 +142,45 @@ export interface EnergyBalance {
   equilibrium_pct: number;
 }
 
+export interface AutonomyProfile {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  consumption_mA: number;
+  consumption_mW: number;
+  autonomy_hrs: number;
+  autonomy_label: string;
+}
+
+export interface AutonomyAnalysis {
+  battery_spec: {
+    model: string;
+    voltage_V: number;
+    capacity_mAh: number;
+    capacity_mWh: number;
+  };
+  profiles: AutonomyProfile[];
+  measured_stats: {
+    avg_mA: number;
+    max_mA: number;
+    min_mA: number;
+    std_mA: number;
+    samples: number;
+  };
+  hourly_consumption: {
+    hour: number;
+    hour_label: string;
+    avg_consumption_mA: number;
+    max_consumption_mA: number;
+  }[];
+  charge_estimate: {
+    avg_charge_current_mA: number;
+    full_charge_hrs: number;
+    full_charge_label: string;
+  };
+}
+
 export interface AIAnalysis {
   status: "ok" | "insufficient_data" | "error";
   data_points: number;
@@ -154,6 +193,7 @@ export interface AIAnalysis {
   trend_analysis: TrendAnalysis;
   hourly_profile: HourlyProfile;
   energy_balance: EnergyBalance;
+  autonomy: AutonomyAnalysis;
   message?: string;
 }
 

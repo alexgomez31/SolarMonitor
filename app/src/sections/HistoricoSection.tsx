@@ -7,7 +7,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import {
-  BarChart2, TrendingUp, Eye, RefreshCw, ChevronDown, ChevronUp, Sun,
+  BarChart2, TrendingUp, Eye, RefreshCw, ChevronDown, ChevronUp, Sun, BatteryCharging, Zap, Clock,
 } from 'lucide-react';
 import { useDailySummary, useLedAnalysis } from '../hooks/useSolarData';
 import type { DayStats, LedSegment } from '../hooks/useSolarData';
@@ -98,24 +98,21 @@ const CompareBar: React.FC<{
   type: 'max' | 'avg';
 }> = ({ days, summary, type }) => {
   const values = days.map(d => summary[d]?.ldr?.[type] ?? 0);
-  const maxVal = Math.max(...values, 1);
+  const m = Math.max(...values, 1);
 
   return (
-    <div className="space-y-2">
-      {days.map((day, i) => {
-        const val = values[i];
-        const pct = (val / maxVal) * 100;
-        const short = day.slice(5);
+    <div className="flex flex-col gap-2 p-4 rounded-xl bg-void-dark/50 border border-white/5">
+      <p className="font-mono-custom text-xs text-white/50 mb-2 uppercase">LDR {type === 'max' ? 'Máximo' : 'Promedio'}</p>
+      {days.map((d, i) => {
+        const v = values[i];
+        const pct = (v / m) * 100;
         return (
-          <div key={day} className="flex items-center gap-3">
-            <span className="font-mono-custom text-[10px] text-white/40 w-10 flex-shrink-0">{short}</span>
-            <div className="flex-1 h-5 bg-white/5 rounded-full overflow-hidden">
-              <div className="h-full rounded-full transition-all duration-700"
-                style={{ width: `${pct}%`, backgroundColor: '#F59E0B' }} />
+          <div key={d} className="flex items-center gap-3">
+            <span className="w-12 font-mono-custom text-[10px] text-white/40">{d.slice(5)}</span>
+            <div className="flex-1 h-2 bg-white/5 rounded-full overflow-hidden">
+              <div className="h-full bg-neon-cyan/70 rounded-full" style={{ width: `${pct}%` }} />
             </div>
-            <span className="font-mono-custom text-xs text-white/70 w-14 text-right flex-shrink-0">
-              {val.toFixed(0)}
-            </span>
+            <span className="w-8 text-right font-mono-custom text-xs text-neon-cyan">{v.toFixed(0)}</span>
           </div>
         );
       })}
@@ -162,6 +159,11 @@ const DayCard: React.FC<{
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {stats.battery && (
+            <span className="hidden sm:flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 font-mono-custom text-[10px] text-emerald-400">
+              <Zap className="w-2.5 h-2.5" /> {stats.battery.charging_efficiency_pct}% cargado
+            </span>
+          )}
           <span className="hidden sm:flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-400/10 border border-amber-400/20 font-mono-custom text-[10px] text-amber-400">
             <Eye className="w-2.5 h-2.5" /> LDR máx {stats.ldr.max}
           </span>
@@ -191,6 +193,29 @@ const DayCard: React.FC<{
               <p className="font-display text-xl text-yellow-400">{stats.encendidos ?? 0}</p>
             </div>
           </div>
+
+          {/* Análisis de Batería (NUEVO) */}
+          {stats.battery && (
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 mb-4 p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/15">
+              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-emerald-500/10 shrink-0">
+                <BatteryCharging className="w-6 h-6 text-emerald-400" />
+              </div>
+              <div className="flex-1">
+                <h4 className="font-display text-emerald-400 text-sm mb-1">Análisis de Carga — Ultrafire 18650 (3.7V, 8800mAh)</h4>
+                <div className="flex flex-wrap gap-x-4 gap-y-2 mt-2">
+                  <span className="font-mono-custom text-xs text-white/60 flex items-center gap-1">
+                    <Zap className="w-3 h-3 text-emerald-400" /> Eficiencia (Capacidad Cargada): <strong className="text-white">{stats.battery.charging_efficiency_pct}%</strong>
+                  </span>
+                  <span className="font-mono-custom text-xs text-white/60 flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-emerald-400" /> Tiempo Total Carga: <strong className="text-white">{durLabel(stats.battery.charging_time_min)}</strong>
+                  </span>
+                  <span className="font-mono-custom text-xs text-white/60 flex items-center gap-1">
+                    <TrendingUp className="w-3 h-3 text-emerald-400" /> Energía Cargada: <strong className="text-white">{stats.battery.energy_charged_mWh} mWh</strong>
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* LED info */}
           {ledData && (

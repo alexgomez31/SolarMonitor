@@ -8,7 +8,7 @@ import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import {
   Activity, Eye, Battery, BatteryCharging, BatteryMedium, Lightbulb, LightbulbOff,
-  CloudSun, Moon, Zap, Sun, Thermometer, Wind, Droplets, Cloud, CloudRain, ThermometerSun
+  CloudSun, Moon, Zap, Sun, Wind, Droplets, Cloud, CloudRain, ThermometerSun
 } from 'lucide-react';
 
 import RealTimeChart from '../components/RealTimeChart';

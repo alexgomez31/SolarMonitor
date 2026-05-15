@@ -7,7 +7,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import {
-  Moon, CloudSun, Clock, BarChart2, ChevronDown, ChevronUp, RefreshCw, Sun, Lightbulb, LightbulbOff,
+  Moon, CloudSun, Clock, BarChart2, ChevronDown, ChevronUp, RefreshCw, Lightbulb, LightbulbOff,
 } from 'lucide-react';
 
 import { useLedAnalysis, useSolarData } from '../hooks/useSolarData';

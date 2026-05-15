@@ -14,7 +14,9 @@ import LucesSection     from './sections/LucesSection';
 import HistoricoSection from './sections/HistoricoSection';
 import InfoSection      from './sections/InfoSection';
 import AISection        from './sections/AISection';
+import AdvancedMLSection from './sections/AdvancedMLSection';
 import SolarFooter      from './sections/SolarFooter';
+import ChatWidget       from './components/ChatWidget';
 
 function App() {
   useLenis();
@@ -30,10 +32,13 @@ function App() {
       <LucesSection />
       <HistoricoSection />
       <AISection />
+      <AdvancedMLSection />
       <InfoSection />
       <SolarFooter />
+      <ChatWidget />
     </main>
   );
 }
 
 export default App;
+

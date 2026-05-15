@@ -5,7 +5,7 @@
 # =============================================================================
 
 import os
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, send_file
 from flask_cors import CORS
 import requests
 import threading
@@ -21,6 +21,8 @@ from sklearn.pipeline import Pipeline
 from scipy import stats
 import warnings
 warnings.filterwarnings('ignore')
+
+import ml_engine
 
 # =============================================================================
 # CONFIGURACIÓN DE LA APLICACIÓN
@@ -758,6 +760,149 @@ def run_energy_balance(data: list) -> dict:
     }
 
 
+def run_autonomy_analysis(data: list) -> dict:
+    """
+    Calcula la autonomía del sistema para múltiples perfiles de consumo.
+    Batería: Ultrafire 18650 — 3.7V, 8800mAh (32560 mWh).
+    """
+    BAT_VOLTAGE = 3.7
+    BAT_CAPACITY_mAh = 8800
+    BAT_CAPACITY_mWh = BAT_VOLTAGE * BAT_CAPACITY_mAh  # 32560 mWh
+
+    # ── Perfiles teóricos de consumo (mA a 3.7V) ────────────────────────────
+    PROFILES = [
+        {
+            "id": "standby",
+            "name": "🔋 Standby (Deep Sleep)",
+            "description": "ESP8266 en modo Deep Sleep, periféricos apagados.",
+            "consumption_mA": 0.02,
+            "color": "#6EE7B7",
+        },
+        {
+            "id": "esp_only",
+            "name": "📡 ESP8266 Activo (WiFi)",
+            "description": "Microcontrolador con WiFi transmitiendo, sin LED.",
+            "consumption_mA": 80,
+            "color": "#00D4FF",
+        },
+        {
+            "id": "esp_sensors",
+            "name": "📡 ESP + Sensores INA219",
+            "description": "ESP8266 con WiFi + 2 sensores INA219 midiendo.",
+            "consumption_mA": 82,
+            "color": "#A78BFA",
+        },
+        {
+            "id": "full_system",
+            "name": "💡 Sistema Completo (LED ON)",
+            "description": "ESP8266 + Sensores + LED indicador encendido.",
+            "consumption_mA": 102,
+            "color": "#F59E0B",
+        },
+    ]
+
+    # ── Consumo REAL medido por el INA219 de batería ────────────────────────
+    discharge_readings = [
+        d for d in data
+        if d.get("bat_current_mA", 0) < 0 or d.get("estado") == "DESCARGANDO"
+    ]
+
+    if discharge_readings:
+        real_currents = [abs(d.get("bat_current_mA", 0)) for d in discharge_readings]
+        real_avg_mA = float(np.mean(real_currents))
+        real_max_mA = float(np.max(real_currents))
+        real_min_mA = float(np.min([c for c in real_currents if c > 0])) if any(c > 0 for c in real_currents) else 0
+        real_std_mA = float(np.std(real_currents))
+    else:
+        all_bat = [abs(d.get("bat_current_mA", 0)) for d in data if d.get("bat_current_mA", 0) != 0]
+        if all_bat:
+            real_avg_mA = float(np.mean(all_bat))
+            real_max_mA = float(np.max(all_bat))
+            real_min_mA = float(np.min(all_bat))
+            real_std_mA = float(np.std(all_bat))
+        else:
+            real_avg_mA, real_max_mA, real_min_mA, real_std_mA = 85, 120, 20, 25
+
+    PROFILES.append({
+        "id": "measured",
+        "name": "📊 Consumo Real Medido",
+        "description": f"Basado en {len(discharge_readings)} lecturas del INA219.",
+        "consumption_mA": round(real_avg_mA, 1),
+        "color": "#EF4444",
+    })
+
+    # ── Calcular autonomía por perfil ────────────────────────────────────────
+    results = []
+    for p in PROFILES:
+        c_mA = p["consumption_mA"]
+        c_mW = c_mA * BAT_VOLTAGE
+        if c_mA > 0:
+            autonomy_hrs = BAT_CAPACITY_mAh / c_mA
+        else:
+            autonomy_hrs = 99999
+
+        if autonomy_hrs >= 8760:
+            label = f"{autonomy_hrs / 8760:.0f} años"
+        elif autonomy_hrs >= 720:
+            label = f"{autonomy_hrs / 720:.0f} meses"
+        elif autonomy_hrs >= 24:
+            label = f"{int(autonomy_hrs / 24)}d {int(autonomy_hrs % 24)}h"
+        else:
+            label = f"{int(autonomy_hrs)}h {int((autonomy_hrs % 1) * 60)}min"
+
+        results.append({
+            "id": p["id"], "name": p["name"], "description": p["description"],
+            "color": p["color"],
+            "consumption_mA": round(c_mA, 2), "consumption_mW": round(c_mW, 1),
+            "autonomy_hrs": round(min(autonomy_hrs, 99999), 1),
+            "autonomy_label": label,
+        })
+
+    # ── Consumo por hora del día ─────────────────────────────────────────────
+    hourly_consumption = {}
+    for d in data:
+        h = d["timestamp"].hour
+        hourly_consumption.setdefault(h, []).append(abs(d.get("bat_current_mA", 0)))
+    hourly_profile = []
+    for h in sorted(hourly_consumption.keys()):
+        vals = hourly_consumption[h]
+        hourly_profile.append({
+            "hour": h, "hour_label": f"{h:02d}:00",
+            "avg_consumption_mA": round(float(np.mean(vals)), 1),
+            "max_consumption_mA": round(float(np.max(vals)), 1),
+        })
+
+    # ── Tiempo estimado para carga completa ──────────────────────────────────
+    charge_readings = [
+        abs(d.get("bat_current_mA", 0)) for d in data
+        if d.get("bat_current_mA", 0) > 0 or d.get("estado") == "CARGANDO"
+    ]
+    avg_charge_mA = float(np.mean(charge_readings)) if charge_readings else 0
+    full_charge_hrs = round(BAT_CAPACITY_mAh / max(avg_charge_mA, 0.01), 1) if avg_charge_mA > 0 else 0
+    full_charge_hrs = min(full_charge_hrs, 9999)
+
+    return {
+        "battery_spec": {
+            "model": "Ultrafire 18650",
+            "voltage_V": BAT_VOLTAGE,
+            "capacity_mAh": BAT_CAPACITY_mAh,
+            "capacity_mWh": BAT_CAPACITY_mWh,
+        },
+        "profiles": results,
+        "measured_stats": {
+            "avg_mA": round(real_avg_mA, 1), "max_mA": round(real_max_mA, 1),
+            "min_mA": round(real_min_mA, 1), "std_mA": round(real_std_mA, 1),
+            "samples": len(discharge_readings),
+        },
+        "hourly_consumption": hourly_profile,
+        "charge_estimate": {
+            "avg_charge_current_mA": round(avg_charge_mA, 1),
+            "full_charge_hrs": full_charge_hrs,
+            "full_charge_label": f"{int(full_charge_hrs)}h {int((full_charge_hrs % 1) * 60)}min" if full_charge_hrs < 9999 else "N/A",
+        },
+    }
+
+
 # =============================================================================
 # RUTAS DE LA API
 # =============================================================================
@@ -850,7 +995,7 @@ def get_history():
             date_param = dates[-1]
 
         history = []
-        resp_day = requests.get(f"{FIREBASE_URL}/lecturas/{date_param}.json?orderBy=\"$key\"&limitToLast=2000", timeout=10)
+        resp_day = requests.get(f"{FIREBASE_URL}/lecturas/{date_param}.json", timeout=10)
         if resp_day.status_code == 200:
             day_data = resp_day.json()
             if day_data and isinstance(day_data, dict):
@@ -883,7 +1028,7 @@ def get_history():
 
 @app.route("/api/daily-summary")
 def get_daily_summary():
-    """Resumen estadístico de los últimos 7 días."""
+    """Resumen estadístico de los últimos 7 días con análisis de batería."""
     try:
         resp_shallow = requests.get(f"{FIREBASE_URL}/lecturas.json?shallow=true", timeout=8)
         if resp_shallow.status_code != 200:
@@ -904,6 +1049,11 @@ def get_daily_summary():
 
             ldrs, encendidos = [], 0
             readings_list = []
+            
+            # Batería 3.7V 8800mAh = 32560 mWh
+            total_capacity_mWh = 32560
+            energy_charged_mWh = 0
+            charging_time_sec = 0
 
             for push_id in sorted(day_data.keys()):
                 record = day_data[push_id]
@@ -919,6 +1069,13 @@ def get_daily_summary():
                 ldrs.append(r["ldr"])
                 if r["estadoLuces"] == "ENCENDIDAS":
                     encendidos += 1
+                    
+                # Calcular tiempo y energía de carga (asumiendo lectura cada ~5 seg)
+                if r["estado"] == "CARGANDO" or r["bateria"]["corriente_mA"] > 0:
+                    charging_time_sec += 5
+                    # Energía (mWh) = Potencia (mW) * (5s / 3600s/h)
+                    energy_charged_mWh += r["bateria"]["potencia_mW"] * (5 / 3600)
+                    
                 readings_list.append({
                     "timestamp":        ts,
                     "hora":             hora,
@@ -933,12 +1090,20 @@ def get_daily_summary():
 
             def safe_max(lst): return round(max(lst), 1) if lst else 0
             def safe_avg(lst): return round(sum(lst)/len(lst), 1) if lst else 0
+            
+            charging_efficiency = min((energy_charged_mWh / total_capacity_mWh) * 100, 100) if total_capacity_mWh > 0 else 0
 
             result[day_key] = {
                 "fecha":      day_key,
                 "count":      len(ldrs),
                 "ldr":        {"max": safe_max(ldrs), "avg": safe_avg(ldrs)},
                 "encendidos": encendidos,
+                "battery": {
+                    "energy_charged_mWh": round(energy_charged_mWh, 2),
+                    "charging_time_min": round(charging_time_sec / 60, 1),
+                    "charging_efficiency_pct": round(charging_efficiency, 2),
+                    "capacity_mWh": total_capacity_mWh
+                },
                 "readings":   readings_list,
             }
         return jsonify(result)
@@ -1056,6 +1221,7 @@ def get_ai_analysis():
         health      = compute_health_score(data, anomalies, clustering)
         hourly      = run_hourly_profile(data)
         energy      = run_energy_balance(data)
+        autonomy    = run_autonomy_analysis(data)
 
         return jsonify({
             "status":      "ok",
@@ -1069,6 +1235,7 @@ def get_ai_analysis():
             "trend_analysis":    trend,
             "hourly_profile":    hourly,
             "energy_balance":    energy,
+            "autonomy":          autonomy,
         })
 
     except Exception as exc:
@@ -1091,6 +1258,347 @@ def get_ai_predict():
         return jsonify({"prediction": None, "error": str(exc)}), 500
 
 
+@app.route("/api/ml-predictive")
+def get_ml_predictive():
+    """Endpoint para el nuevo motor predictivo avanzado (MySQL + Scikit-Learn)"""
+    try:
+        insights = ml_engine.get_ml_advanced_insights(data_cache)
+        return jsonify(insights)
+    except Exception as exc:
+        print(f"[ML-Predictive] Error: {exc}")
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+@app.route("/api/ml-export-excel")
+def export_ml_excel():
+    """Genera y descarga el reporte en formato Excel .xlsx con 2000 registros e IA aplicada"""
+    try:
+        excel_io = ml_engine.generate_excel_report()
+        return send_file(
+            excel_io,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name=f"DataScience_Solar_Report_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+        )
+    except Exception as exc:
+        print(f"[ML-Export] Error: {exc}")
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+
+@app.route("/api/chat", methods=["POST"])
+def chat_endpoint():
+    """Chatbot IA para consultas sobre el sistema fotovoltaico."""
+    try:
+        body = request.get_json(silent=True) or {}
+        question = body.get("question", "").strip()
+        if not question:
+            return jsonify({"answer": "Por favor, escribe una pregunta.", "type": "error"})
+
+        answer = process_chat_question(question)
+        return jsonify({"answer": answer, "type": "success"})
+    except Exception as exc:
+        print(f"[Chat] Error: {exc}")
+        return jsonify({"answer": f"Error procesando la pregunta: {str(exc)}", "type": "error"})
+
+
+def process_chat_question(question: str) -> str:
+    """Motor de IA local para responder preguntas sobre el sistema solar."""
+    q = question.lower().strip()
+
+    # Cargar datos actuales
+    current = data_cache.copy()
+    ldr = current.get("ldr", 0)
+    panel = current.get("panel", {})
+    bateria = current.get("bateria", {})
+    estado = current.get("estado", "DESCONOCIDO")
+    fotocelda = current.get("estadoFotocelda", "DESCONOCIDO")
+    luces = current.get("estadoLuces", "DESCONOCIDO")
+    hora = current.get("hora", "N/A")
+
+    pv = panel.get("voltaje_V", 0)
+    pc = panel.get("corriente_mA", 0)
+    pp = panel.get("potencia_mW", 0)
+    bv = bateria.get("voltaje_V", 0)
+    bc = bateria.get("corriente_mA", 0)
+    bp = bateria.get("potencia_mW", 0)
+
+    # Cargar historial para análisis estadístico
+    try:
+        history = load_all_history()
+    except Exception:
+        history = []
+
+    # ── CLASIFICACIÓN DE INTENCIÓN ──────────────────────────────────────────
+    # Saludos
+    if any(w in q for w in ["hola", "hey", "buenos", "buenas", "saludos", "qué tal"]):
+        return (
+            f"¡Hola! 👋 Soy **SolarAI**, el asistente inteligente del sistema fotovoltaico.\n\n"
+            f"📊 **Estado actual del sistema:**\n"
+            f"- Panel: {pv:.2f}V · {pc:.1f}mA · {pp:.1f}mW\n"
+            f"- Batería: {bv:.2f}V · {bc:.1f}mA\n"
+            f"- Fotocelda: {fotocelda} | Luces: {luces}\n"
+            f"- Estado: {estado}\n\n"
+            f"Puedes preguntarme sobre voltaje, potencia, batería, eficiencia, "
+            f"predicciones, anomalías, autonomía, clima y más. ¡Adelante! 🚀"
+        )
+
+    # Panel / voltaje / potencia / corriente
+    if any(w in q for w in ["voltaje", "voltage", "tension"]):
+        if "panel" in q or "solar" in q or not ("bateria" in q or "batería" in q):
+            if history:
+                voltages = [d.get("voltage", 0) for d in history if d.get("voltage", 0) > 0]
+                if voltages:
+                    return (
+                        f"⚡ **Voltaje del Panel Solar:**\n\n"
+                        f"- **Actual:** {pv:.2f} V\n"
+                        f"- **Máximo histórico:** {max(voltages):.2f} V\n"
+                        f"- **Mínimo histórico:** {min(voltages):.2f} V\n"
+                        f"- **Promedio:** {np.mean(voltages):.2f} V\n"
+                        f"- **Desv. estándar:** {np.std(voltages):.2f} V\n\n"
+                        f"📊 Basado en {len(voltages)} lecturas históricas."
+                    )
+            return f"⚡ El voltaje actual del panel es **{pv:.2f} V**."
+        else:
+            return (
+                f"🔋 **Voltaje de la Batería:**\n\n"
+                f"- **Actual:** {bv:.2f} V\n"
+                f"- **Estado:** {estado}\n\n"
+                f"Una batería 18650 está a plena carga alrededor de 4.2V y descargada a 3.0V."
+            )
+
+    if any(w in q for w in ["potencia", "power", "watts", "generando", "genera"]):
+        if history:
+            powers = [d.get("power_mW", 0) for d in history]
+            active = [p for p in powers if p > 0]
+            return (
+                f"⚡ **Potencia del Panel Solar:**\n\n"
+                f"- **Actual:** {pp:.1f} mW\n"
+                f"- **Máxima registrada:** {max(powers):.1f} mW\n"
+                f"- **Promedio (generando):** {np.mean(active):.1f} mW\n"
+                f"- **% del tiempo generando:** {len(active)/len(powers)*100:.1f}%\n\n"
+                f"📊 Análisis sobre {len(powers)} lecturas."
+            )
+        return f"⚡ La potencia actual del panel es **{pp:.1f} mW**."
+
+    if any(w in q for w in ["corriente", "amperios", "amperaje", "current"]):
+        return (
+            f"🔌 **Corriente del sistema:**\n\n"
+            f"- Panel: **{pc:.1f} mA**\n"
+            f"- Batería: **{bc:.1f} mA** {'(cargando)' if bc > 0 else '(descargando)' if bc < 0 else '(equilibrio)'}\n"
+        )
+
+    # Batería
+    if any(w in q for w in ["batería", "bateria", "battery", "carga", "cargando", "descarga"]):
+        BAT_CAP = 8800
+        if bc != 0:
+            if bc > 0:
+                time_full = BAT_CAP / abs(bc)
+                return (
+                    f"🔋 **Batería Ultrafire 18650 (3.7V, 8800mAh):**\n\n"
+                    f"- **Voltaje:** {bv:.2f} V\n"
+                    f"- **Corriente:** {bc:.1f} mA (CARGANDO ⬆️)\n"
+                    f"- **Potencia:** {bp:.1f} mW\n"
+                    f"- **Estado:** {estado}\n\n"
+                    f"⏱️ A esta tasa de carga ({abs(bc):.0f}mA), la batería "
+                    f"tardaría **{time_full:.1f}h** en cargarse completamente."
+                )
+            else:
+                autonomy = BAT_CAP / abs(bc)
+                return (
+                    f"🔋 **Batería Ultrafire 18650 (3.7V, 8800mAh):**\n\n"
+                    f"- **Voltaje:** {bv:.2f} V\n"
+                    f"- **Corriente:** {bc:.1f} mA (DESCARGANDO ⬇️)\n"
+                    f"- **Potencia:** {bp:.1f} mW\n"
+                    f"- **Estado:** {estado}\n\n"
+                    f"⏱️ A este consumo ({abs(bc):.0f}mA), la autonomía estimada "
+                    f"es de **{autonomy:.1f} horas** ({autonomy/24:.1f} días)."
+                )
+        return (
+            f"🔋 **Batería:** {bv:.2f}V · {bc:.1f}mA · Estado: {estado}\n\n"
+            f"No hay flujo de corriente significativo en este momento."
+        )
+
+    # LDR / luz / fotocelda
+    if any(w in q for w in ["ldr", "luz", "oscuridad", "fotocelda", "sensor", "luminosidad", "dia", "día", "noche"]):
+        desc = "🌙 Es de noche" if ldr >= 700 else "☀️ Es de día" if ldr < 400 else "🌤️ Condición intermedia"
+        return (
+            f"👁️ **Sensor LDR (Fotoresistencia):**\n\n"
+            f"- **Valor actual:** {ldr}\n"
+            f"- **Fotocelda:** {fotocelda}\n"
+            f"- **Interpretación:** {desc}\n\n"
+            f"📝 Umbrales: LDR < 700 = LUZ (día) | LDR ≥ 700 = OSCURIDAD (noche)\n"
+            f"💡 Luces LED: {luces}"
+        )
+
+    # LED / luces
+    if any(w in q for w in ["led", "luces", "encendida", "apagada", "lampara", "lámpara", "iluminación", "iluminacion"]):
+        return (
+            f"💡 **Estado de las Luces LED:**\n\n"
+            f"- **Estado:** {luces}\n"
+            f"- **Fotocelda:** {fotocelda}\n"
+            f"- **LDR:** {ldr}\n\n"
+            f"Las luces se encienden automáticamente cuando el LDR detecta oscuridad "
+            f"(LDR ≥ 700) y se apagan con luz (LDR < 700)."
+        )
+
+    # Eficiencia
+    if any(w in q for w in ["eficiencia", "rendimiento", "efficiency"]):
+        if history:
+            max_power = max([d.get("power_mW", 0) for d in history], default=1)
+            effs = []
+            for d in history:
+                sun = (1024 - d["ldr"]) / 1024.0
+                expected = sun * max_power
+                if expected > 10:
+                    effs.append(min(1.0, d.get("power_mW", 0) / expected) * 100)
+            avg_eff = np.mean(effs) if effs else 0
+            return (
+                f"📈 **Eficiencia del Sistema:**\n\n"
+                f"- **Eficiencia promedio:** {avg_eff:.1f}%\n"
+                f"- **Potencia máxima registrada:** {max_power:.1f} mW\n"
+                f"- **Potencia actual:** {pp:.1f} mW\n\n"
+                f"La eficiencia se calcula comparando la potencia real generada "
+                f"vs la potencia esperada según el nivel de luz solar (LDR)."
+            )
+        return "No tengo suficientes datos históricos para calcular la eficiencia."
+
+    # Anomalías
+    if any(w in q for w in ["anomal", "problema", "error", "falla", "raro", "extraño"]):
+        if len(history) >= 10:
+            anomalies = run_anomaly_detection(history)
+            n = anomalies["total"]
+            pct = anomalies["pct"]
+            if n > 0:
+                last = anomalies["anomalies"][-1]
+                return (
+                    f"⚠️ **Detección de Anomalías:**\n\n"
+                    f"- **Total detectadas:** {n} ({pct}% de las lecturas)\n"
+                    f"- **Última anomalía:** {last['description']}\n"
+                    f"  - Hora: {last['hora']} | Severidad: {last['severity']}\n"
+                    f"  - Z-score: {last['z_score']}\n\n"
+                    f"Las anomalías se detectan mediante Z-score multivariante (LDR + Potencia)."
+                )
+            return "✅ No se han detectado anomalías significativas en los datos recientes."
+        return "Necesito más lecturas históricas para realizar detección de anomalías."
+
+    # Predicción
+    if any(w in q for w in ["predic", "futuro", "pronostic", "estimación", "estimar", "prever"]):
+        if len(history) >= 10:
+            pred = run_power_prediction(history)
+            return (
+                f"🔮 **Predicción de Potencia (Regresión Polinomial):**\n\n"
+                f"- **LDR actual:** {pred['current_ldr']}\n"
+                f"- **Potencia predicha:** {pred['current_prediction']:.1f} mW\n"
+                f"- **Potencia real:** {pred['current_real']:.1f} mW\n"
+                f"- **Precisión del modelo (R²):** {pred['model_score_pct']}%\n"
+                f"- **Error estándar:** ±{pred['std_error']:.1f} mW\n\n"
+                f"El modelo usa regresión polinomial de grado 2 sobre la relación LDR → Potencia."
+            )
+        return "Necesito más datos para ejecutar el modelo predictivo."
+
+    # Autonomía
+    if any(w in q for w in ["autonomía", "autonomia", "cuánto dura", "cuanto dura", "duración", "duracion"]):
+        if len(history) >= 5:
+            auto = run_autonomy_analysis(history)
+            lines = "⏱️ **Autonomía por Perfil de Consumo:**\n\n"
+            for p in auto["profiles"]:
+                lines += f"- **{p['name']}:** {p['autonomy_label']} ({p['consumption_mA']}mA)\n"
+            lines += f"\n🔋 Batería: {auto['battery_spec']['model']} · {auto['battery_spec']['capacity_mAh']}mAh"
+            return lines
+        return "Necesito más datos para calcular la autonomía."
+
+    # Clima
+    if any(w in q for w in ["clima", "tiempo", "temperatura", "lluvia", "humedad", "viento", "weather"]):
+        w = weather_cache
+        if w.get("temperature") is not None:
+            return (
+                f"🌤️ **Clima en Popayán (Parque Caldas):**\n\n"
+                f"- **Temperatura:** {w.get('temperature', 'N/A')}°C\n"
+                f"- **Humedad:** {w.get('humidity', 'N/A')}%\n"
+                f"- **Condición:** {w.get('description', 'N/A')}\n"
+                f"- **Viento:** {w.get('wind_speed', 'N/A')} km/h\n"
+                f"- **Precipitación:** {w.get('precipitation', 0)} mm\n\n"
+                f"El clima afecta directamente la generación solar. "
+                f"Días nublados reducen la radiación incidente en el panel."
+            )
+        return "No tengo datos del clima disponibles en este momento."
+
+    # Estado actual / resumen
+    if any(w in q for w in ["estado", "resumen", "cómo está", "como esta", "actual", "ahora", "sistema"]):
+        return (
+            f"📊 **Resumen del Sistema Fotovoltaico:**\n\n"
+            f"🔆 **Panel Solar:**\n"
+            f"  - Voltaje: {pv:.2f} V | Corriente: {pc:.1f} mA | Potencia: {pp:.1f} mW\n\n"
+            f"🔋 **Batería (Ultrafire 18650):**\n"
+            f"  - Voltaje: {bv:.2f} V | Corriente: {bc:.1f} mA | Estado: {estado}\n\n"
+            f"👁️ **Sensores:**\n"
+            f"  - LDR: {ldr} | Fotocelda: {fotocelda} | Luces: {luces}\n\n"
+            f"🕐 Última lectura: {hora}\n"
+            f"📡 Datos en Firebase: {len(history)} registros históricos"
+        )
+
+    # Datos históricos / cuántos datos
+    if any(w in q for w in ["histor", "datos", "registros", "cuántos", "cuantos", "lecturas"]):
+        if history:
+            dates = set(d["fecha"] for d in history)
+            return (
+                f"📂 **Datos Históricos:**\n\n"
+                f"- **Total de registros:** {len(history)}\n"
+                f"- **Días con datos:** {len(dates)}\n"
+                f"- **Fechas:** {', '.join(sorted(dates)[-5:])}\n"
+                f"- **Primer registro:** {history[0]['ts_iso']}\n"
+                f"- **Último registro:** {history[-1]['ts_iso']}\n"
+            )
+        return "No hay datos históricos disponibles."
+
+    # Proyecto / qué es esto
+    if any(w in q for w in ["proyecto", "qué es", "que es", "información", "acerca", "sobre"]):
+        return (
+            f"🌞 **Sistema de Monitoreo Fotovoltaico — SolarMonitor PV**\n\n"
+            f"Este es un sistema IoT de monitoreo solar instalado en el "
+            f"**Parque Caldas, Popayán, Cauca, Colombia** (2°27'N, 76°37'W).\n\n"
+            f"**Componentes:**\n"
+            f"- 🔆 Panel solar monocristalino\n"
+            f"- 🔋 Batería Ultrafire 18650 (3.7V, 8800mAh)\n"
+            f"- 📡 ESP8266 con WiFi 2.4GHz\n"
+            f"- ⚡ 2× Sensores INA219 (panel + batería)\n"
+            f"- 👁️ Sensor LDR (fotoresistencia)\n"
+            f"- 💡 LED indicador automático\n\n"
+            f"**IA integrada:** K-Means clustering, regresión polinomial, "
+            f"detección de anomalías (Z-score), análisis de correlación Pearson."
+        )
+
+    # Ayuda
+    if any(w in q for w in ["ayuda", "help", "puedes", "preguntar", "qué sabes", "que sabes", "funciones"]):
+        return (
+            f"🤖 **Puedo ayudarte con:**\n\n"
+            f"⚡ **Datos en tiempo real** — voltaje, corriente, potencia\n"
+            f"🔋 **Batería** — estado de carga, autonomía, tiempo de carga\n"
+            f"👁️ **Sensores** — LDR, fotocelda, luces LED\n"
+            f"📈 **Eficiencia** — rendimiento del panel solar\n"
+            f"🔮 **Predicciones** — modelo de regresión polinomial\n"
+            f"⚠️ **Anomalías** — detección de lecturas inusuales\n"
+            f"⏱️ **Autonomía** — duración por perfil de consumo\n"
+            f"🌤️ **Clima** — condiciones meteorológicas actuales\n"
+            f"📂 **Historial** — registros y estadísticas\n"
+            f"📊 **Resumen** — estado general del sistema\n\n"
+            f"💡 Ejemplo: *\"¿Cuál es la autonomía del sistema?\"*"
+        )
+
+    # Respuesta genérica inteligente
+    return (
+        f"🤔 No estoy seguro de cómo interpretar esa pregunta.\n\n"
+        f"Intenta preguntar sobre:\n"
+        f"- **Voltaje, corriente o potencia** del panel\n"
+        f"- **Batería** y su estado de carga\n"
+        f"- **Eficiencia** del sistema\n"
+        f"- **Predicciones** de generación\n"
+        f"- **Anomalías** detectadas\n"
+        f"- **Autonomía** por perfil de consumo\n"
+        f"- **Estado actual** del sistema\n\n"
+        f"O escribe **\"ayuda\"** para ver todas mis funciones."
+    )
+
+
 # =============================================================================
 # INICIO DE LA APLICACIÓN
 # =============================================================================
@@ -1110,5 +1618,12 @@ if __name__ == "__main__":
     print("  GET  /api/led-analysis  -> Análisis LED por día")
     print("  GET  /api/ai-analysis   -> [IA] Análisis completo de inteligencia artificial")
     print("  GET  /api/ai-predict    -> [IA] Predicción de potencia en tiempo real")
+    print("  GET  /api/ml-predictive -> [IA] Motor Predictivo Avanzado (MySQL)")
+    print("  POST /api/chat          -> [IA] Chatbot SolarAI")
     print("=" * 60)
+    
+    # Iniciar motor ML predictivo en background
+    ml_engine.init_ml_engine()
+    
     app.run(host="0.0.0.0", port=5000, debug=True)
+

@@ -78,6 +78,12 @@ export interface DayStats {
   count:      number;
   ldr:        { max: number; avg: number };
   encendidos: number;
+  battery?: {
+    energy_charged_mWh: number;
+    charging_time_min: number;
+    charging_efficiency_pct: number;
+    capacity_mWh: number;
+  };
   readings:   DayReading[];
 }
 
