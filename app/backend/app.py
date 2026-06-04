@@ -1264,6 +1264,22 @@ def get_req3_analysis():
         print(f"[Req3] Error: {exc}")
         return jsonify({"status": "error", "message": str(exc)}), 500
 
+@app.route("/api/req3-download-notebook")
+def download_req3_notebook():
+    """Genera y descarga un Jupyter Notebook (.ipynb) con el análisis completo de los requerimientos."""
+    try:
+        history = load_all_history()
+        notebook_io = req3_engine.generate_jupyter_notebook(history)
+        return send_file(
+            notebook_io,
+            mimetype="application/x-ipynb+json",
+            as_attachment=True,
+            download_name=f"SolarMonitor_Requerimientos_{datetime.now().strftime('%Y%m%d_%H%M')}.ipynb"
+        )
+    except Exception as exc:
+        print(f"[Req3-Notebook] Error: {exc}")
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
 
 @app.route("/api/ml-export-excel")
 def export_ml_excel():

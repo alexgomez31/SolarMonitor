@@ -7,6 +7,9 @@ export interface Req1Modelado {
   energia_total_j: number;
   potencia_promedio_mw: number;
   resistencia_promedio_ohm: number;
+  potencia_max_mw: number;
+  voltaje_max_v: number;
+  corriente_max_ma: number;
 }
 
 export interface CaidaTension {
@@ -14,14 +17,33 @@ export interface CaidaTension {
   v_anterior: number;
   v_actual: number;
   caida: number;
+  dv_dt: number;
+}
+
+export interface EfectoJoule {
+  total_perdidas_mw: number;
+  promedio_mw: number;
+  max_mw: number;
+  registros_con_perdida: number;
+  formula: string;
+}
+
+export interface ScatterPoint {
+  t_hours: number;
+  bat_v: number;
+  regression_v: number;
+  hora: string;
 }
 
 export interface Req2Eficiencia {
   eficiencia_convertidor_pct: number;
   error_voltaje_promedio_pct: number;
   descarga_slope: number;
+  descarga_intercept: number;
   descarga_r2: number;
+  scatter_data: ScatterPoint[];
   caidas_tension: CaidaTension[];
+  efecto_joule: EfectoJoule;
 }
 
 export interface GraficaComparativa {
@@ -36,9 +58,12 @@ export interface TablaResumen {
   fecha: string;
   v_mean: number;
   v_max: number;
+  v_min: number;
+  v_std: number;
   p_mean: number;
   p_max: number;
   error_mean: number;
+  joule_total: number;
 }
 
 export interface Req3Visualizacion {
