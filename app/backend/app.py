@@ -23,7 +23,8 @@ import warnings
 warnings.filterwarnings('ignore')
 
 import ml_engine
-
+import req3_engine
+  
 # =============================================================================
 # CONFIGURACIÓN DE LA APLICACIÓN
 # =============================================================================
@@ -1251,6 +1252,18 @@ def get_ml_predictive():
     except Exception as exc:
         print(f"[ML-Predictive] Error: {exc}")
         return jsonify({"status": "error", "message": str(exc)}), 500
+
+@app.route("/api/req3-analysis")
+def get_req3_analysis():
+    """Endpoint para los Requerimientos #3: Análisis Físico y Eficiencia con Pandas/NumPy"""
+    try:
+        history = load_all_history()
+        analysis = req3_engine.generate_req3_analysis(history)
+        return jsonify(analysis)
+    except Exception as exc:
+        print(f"[Req3] Error: {exc}")
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
 
 @app.route("/api/ml-export-excel")
 def export_ml_excel():

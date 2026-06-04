@@ -36,7 +36,12 @@ def get_db_connection():
     return pymysql.connect(**DB_CONFIG)
 
 def fetch_historical_data():
-    conn = get_db_connection()
+    try:
+        conn = get_db_connection()
+    except Exception as e:
+        print(f"[ML] Advertencia: No se pudo conectar a MySQL local ({e}). El motor de IA local estará desactivado. Para activarlo, instala MySQL e importa 'parque_caldas.sql'.")
+        return []
+        
     try:
         with conn.cursor() as cursor:
             # Seleccionar los últimos 5000 registros para entrenar

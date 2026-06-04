@@ -15,6 +15,7 @@ import HistoricoSection from './sections/HistoricoSection';
 import InfoSection      from './sections/InfoSection';
 import AISection        from './sections/AISection';
 import AdvancedMLSection from './sections/AdvancedMLSection';
+import Req3Section      from './sections/Req3Section';
 import SolarFooter      from './sections/SolarFooter';
 import ChatWidget       from './components/ChatWidget';
 
@@ -33,6 +34,7 @@ function App() {
       <HistoricoSection />
       <AISection />
       <AdvancedMLSection />
+      <Req3Section />
       <InfoSection />
       <SolarFooter />
       <ChatWidget />
