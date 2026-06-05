@@ -304,7 +304,13 @@ fetcher_thread.start()
 # =============================================================================
 
 def load_all_history(limit_days=3) -> list:
-    """Carga el historial reciente de Firebase (últimos N días por defecto) para optimizar consumo."""
+    """Carga el historial reciente de Firebase (últimos N días por defecto) para optimizar consumo.
+    Genera TODOS los campos requeridos por las funciones de análisis de IA:
+      - ts_iso (str): timestamp en formato ISO para serialización JSON
+      - timestamp (datetime): objeto datetime para cálculos hora/minuto
+      - voltage, current_mA, power_mW: métricas planas del panel
+      - bat_voltage, bat_current_mA, bat_power_mW: métricas planas de batería
+    """
     try:
         # 1. Obtener lista de fechas
         resp_shallow = requests.get(f"{FIREBASE_URL}/lecturas.json?shallow=true", timeout=8)
@@ -331,10 +337,26 @@ def load_all_history(limit_days=3) -> list:
                     continue
                 r = parse_reading(record)
                 r["fecha"] = day_key
-                # Añadir métricas planas para retrocompatibilidad en otros endpoints si es necesario
+
+                # ── Construir timestamp ISO y datetime object ──
+                hora_str = r["hora"] or "00:00:00"
+                try:
+                    dt = datetime.strptime(f"{day_key} {hora_str}", "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    dt = datetime.strptime(day_key, "%Y-%m-%d")
+                r["ts_iso"] = dt.isoformat()
+                r["timestamp"] = dt
+
+                # ── Métricas planas del panel ──
                 r["voltage"] = r["panel"]["voltaje_V"]
+                r["current_mA"] = r["panel"]["corriente_mA"]
                 r["power_mW"] = r["panel"]["potencia_mW"]
+
+                # ── Métricas planas de batería ──
                 r["bat_voltage"] = r["bateria"]["voltaje_V"]
+                r["bat_current_mA"] = r["bateria"]["corriente_mA"]
+                r["bat_power_mW"] = r["bateria"]["potencia_mW"]
+
                 history.append(r)
         return history
     except Exception as exc:

@@ -351,7 +351,7 @@ eficiencia = (bat_v × bat_i) / (panel_v × panel_i) × 100
                     🎯 2.2 Error Teórico vs Real
                   </h3>
                   <p style={{ color: "rgba(255,255,255,0.5)", fontSize: "0.85rem", marginBottom: "1.25rem" }}>
-                    Desviación del voltaje medido respecto al modelo teórico basado en LDR
+                    Desviación del voltaje medido respecto al modelo teórico de la curva I-V del panel solar.
                   </p>
 
                   <div style={{ margin: "1.5rem 0" }}>
@@ -368,7 +368,8 @@ eficiencia = (bat_v × bat_i) / (panel_v × panel_i) × 100
                     </div>
                   </div>
 
-                  <CodeBlock code={`# V_teórico = 18V × (1 - LDR/1024)
+                  <CodeBlock code={`# Curva I-V linealizada (Voc=18V, Isc=270mA)
+V_teo = 18.0 * (1.0 - I_panel / 270.0)
 # ε = |V_teo - V_real| / V_teo × 100
 error_prom = ${data.req2_eficiencia.error_voltaje_promedio_pct}%`} />
 

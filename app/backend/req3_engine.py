@@ -67,6 +67,7 @@ def load_and_prepare_dataset(history_data):
                 'panel_p_mw': d.get('panel', {}).get('potencia_mW', 0),
                 'bat_v': d.get('bateria', {}).get('voltaje_V', 0),
                 'bat_i_ma': d.get('bateria', {}).get('corriente_mA', 0),
+                'bat_p_mw': d.get('bateria', {}).get('potencia_mW', 0),
             })
         except:
             pass
@@ -113,7 +114,8 @@ def process_and_clean_data(df):
 
 # 2.1 Programar cálculo de eficiencia
 def calc_efficiency(df):
-    """Computar rendimiento del convertidor (Panel -> Batería)."""
+    """Computar rendimiento del convertidor (Panel -> Batería).
+    Usa bat_p_mw directamente si está disponible, sino recalcula V*I."""
     if df.empty: return 0.0
     
     # Solo calcular cuando está cargando (potencia de batería es positiva)
@@ -123,9 +125,14 @@ def calc_efficiency(df):
     if charging_df.empty: return 0.0
     
     # Eficiencia = (Potencia Salida / Potencia Entrada) * 100
-    # Asumimos que P_entrada es Panel y P_salida es lo que llega a Batería
+    # P_entrada = Panel, P_salida = lo que llega a Batería
     p_in = charging_df['calc_potencia_mw'].sum()
-    p_out = (charging_df['bat_v'] * charging_df['bat_i_ma']).sum()
+    
+    # Usar potencia de batería directa si existe, sino recalcular
+    if 'bat_p_mw' in charging_df.columns and charging_df['bat_p_mw'].abs().sum() > 0:
+        p_out = charging_df['bat_p_mw'].abs().sum()
+    else:
+        p_out = (charging_df['bat_v'] * charging_df['bat_i_ma']).abs().sum()
     
     if p_in > 0:
         eff = (p_out / p_in) * 100.0
@@ -134,28 +141,47 @@ def calc_efficiency(df):
 
 # 2.2 Calcular errores
 def calc_theoretical_vs_real(df):
-    """Calcula diferencia porcentual entre el modelo teórico y el real."""
+    """Calcula diferencia porcentual entre el modelo teórico y el real.
+    
+    Modelo Teórico basado en la curva I-V linealizada del panel solar:
+      V_teo = V_oc × (1 - I / I_sc)
+    donde V_oc = 18V (voltaje circuito abierto) e I_sc = 270mA (corriente cortocircuito).
+    
+    Para potencia, comparamos P_calculada = V × I (fórmula de Ohm) 
+    vs P_sensor (lectura directa del INA219).
+    
+    NOTA: El LDR es un sensor binario (LUZ/OSCURIDAD), NO mide
+    intensidad de radiación, por lo que no se usa en el modelo teórico.
+    """
     if df.empty: return df
     
-    # Modelo Teórico: Asumimos un panel de 5W (18V max, ~270mA max)
-    # LDR va de 0 (mucha luz) a 1024 (oscuridad)
-    # Voltaje Teórico = 18V * (1 - LDR/1024)
-    df['teorico_v'] = 18.0 * (1.0 - (df['ldr'] / 1024.0).clip(0, 1))
+    # Parámetros del panel solar (especificaciones del fabricante)
+    V_OC = 18.0    # Voltaje de circuito abierto (V)
+    I_SC = 270.0   # Corriente de cortocircuito (mA)
     
-    # Potencia Teórica = 5000mW * (1 - LDR/1024)
-    df['teorico_p_mw'] = 5000.0 * (1.0 - (df['ldr'] / 1024.0).clip(0, 1))
+    # Voltaje Teórico: Curva I-V linealizada del panel
+    # V_teo = V_oc × (1 - I_panel / I_sc)
+    df['teorico_v'] = np.where(
+        df['panel_i_ma'] > 0,
+        V_OC * (1.0 - (df['panel_i_ma'] / I_SC).clip(0, 1)),
+        0
+    )
     
-    # Error Porcentual V = |Teorico - Real| / Teorico * 100
-    # Protegemos contra division por cero
+    # Potencia Teórica: P = V × I (ley de Ohm, calculada)
+    # Comparamos contra la lectura directa del sensor INA219 (panel_p_mw)
+    df['teorico_p_mw'] = df['panel_v'] * df['panel_i_ma']
+    
+    # Error Porcentual de Voltaje = |V_teo - V_real| / V_teo × 100
     df['error_v_pct'] = np.where(
         df['teorico_v'] > 0.5,
         np.abs(df['teorico_v'] - df['panel_v']) / df['teorico_v'] * 100.0,
         0
     )
     
+    # Error Porcentual de Potencia = |P_calc - P_sensor| / P_calc × 100
     df['error_p_pct'] = np.where(
         df['teorico_p_mw'] > 10,
-        np.abs(df['teorico_p_mw'] - df['calc_potencia_mw']) / df['teorico_p_mw'] * 100.0,
+        np.abs(df['teorico_p_mw'] - df['panel_p_mw']) / df['teorico_p_mw'] * 100.0,
         0
     )
     
@@ -553,13 +579,24 @@ def generate_jupyter_notebook(history_data):
     md([
         "## 🎯 Requerimiento 2.2 — Cálculo de Errores\n",
         "\n",
-        "Comparamos el voltaje teórico del panel (basado en el LDR) contra el valor medido.\n",
-        "- **Voltaje Teórico:** $V_{teo} = 18V \\times (1 - \\frac{LDR}{1024})$\n",
-        "- **Error Porcentual:** $\\epsilon = \\frac{|V_{teo} - V_{real}|}{V_{teo}} \\times 100\\%$"
+        "Comparamos el voltaje teórico del panel (curva I-V linealizada) contra el valor medido.\n",
+        "- **Voltaje Teórico:** $V_{teo} = V_{oc} \\times (1 - \\frac{I}{I_{sc}})$ donde $V_{oc}=18V$, $I_{sc}=270mA$\n",
+        "- **Error Porcentual:** $\\epsilon = \\frac{|V_{teo} - V_{real}|}{V_{teo}} \\times 100\\%$\n",
+        "\n",
+        "**Nota:** El LDR es un sensor binario (LUZ/OSCURIDAD), no mide radiación, por lo que el modelo teórico se basa en la curva I-V del panel."
     ])
     code([
-        "# 2.2 Error teórico vs real\n",
-        "df['teorico_v'] = 18.0 * (1.0 - (df['ldr'] / 1024.0).clip(0, 1))\n",
+        "# 2.2 Error teórico vs real (Curva I-V del panel solar)\n",
+        "V_OC = 18.0   # Voltaje circuito abierto (V)\n",
+        "I_SC = 270.0   # Corriente cortocircuito (mA)\n",
+        "\n",
+        "# V_teo = V_oc × (1 - I/I_sc)\n",
+        "df['teorico_v'] = np.where(\n",
+        "    df['panel_i_ma'] > 0,\n",
+        "    V_OC * (1.0 - (df['panel_i_ma'] / I_SC).clip(0, 1)),\n",
+        "    0\n",
+        ")\n",
+        "\n",
         "df['error_pct'] = np.where(\n",
         "    df['teorico_v'] > 0.5,\n",
         "    np.abs(df['teorico_v'] - df['panel_v']) / df['teorico_v'] * 100.0,\n",
@@ -572,9 +609,9 @@ def generate_jupyter_notebook(history_data):
         "# Gráfica\n",
         "fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))\n",
         "\n",
-        "ax1.plot(df.index, df['teorico_v'], label='Teórico', color='#EF4444', linestyle='--', linewidth=2)\n",
-        "ax1.plot(df.index, df['panel_v'], label='Real', color='#00D4FF', linewidth=2)\n",
-        "ax1.set_title('Voltaje: Teórico vs Real')\n",
+        "ax1.plot(df.index, df['teorico_v'], label='Teórico (I-V)', color='#EF4444', linestyle='--', linewidth=2)\n",
+        "ax1.plot(df.index, df['panel_v'], label='Real (Medido)', color='#00D4FF', linewidth=2)\n",
+        "ax1.set_title('Voltaje: Teórico (Curva I-V) vs Real')\n",
         "ax1.set_xlabel('Lectura #')\n",
         "ax1.set_ylabel('Voltaje (V)')\n",
         "ax1.legend()\n",
